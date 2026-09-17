@@ -56,6 +56,7 @@ export default function ZoneDetail() {
   const [summary, setSummary] = React.useState<SlotSummary | null>(null);
   const [slots, setSlots] = React.useState<Slot[] | null>(null);
   const [tariff, setTariff] = React.useState<CachedTariff | null>(null);
+  const [tariffLoading, setTariffLoading] = React.useState(true);
   const [loading, setLoading] = React.useState(true);
   const [zoneError, setZoneError] = React.useState<string | null>(null);
   const [favourited, setFavourited] = React.useState(false);
@@ -134,6 +135,7 @@ export default function ZoneDetail() {
   React.useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    setTariffLoading(true);
     void api.tariffs
       .applicable(id, quotedType)
       .then((found) => {
@@ -143,6 +145,9 @@ export default function ZoneDetail() {
         // Left null. The fare card renders its own explanation rather than
         // putting an error banner over the whole screen — the availability
         // figures above it are still worth reading.
+      })
+      .finally(() => {
+        if (!cancelled) setTariffLoading(false);
       });
     return () => {
       cancelled = true;
@@ -290,7 +295,9 @@ export default function ZoneDetail() {
       </View>
 
       {/* ---------------------------------------------- breakdown by type */}
-      {byType && byType.length > 0 ? (
+      {loading ? (
+        <Loading label="Checking bay types" />
+      ) : byType && byType.length > 0 ? (
         <Card style={styles.tight}>
           {byType.map(([type, counts], index) => (
             <TypeLine
@@ -328,7 +335,9 @@ export default function ZoneDetail() {
         )}
       </Card>
 
-      {tariff ? (
+      {tariffLoading ? (
+        <Loading label="Checking the rate card" />
+      ) : tariff ? (
         <Sub style={styles.note}>
           Rates for {(vehicleTypeWord[quotedType] ?? quotedType).toLowerCase()}. The server prices
           every session — this is what it will charge, not a figure worked out on this phone.
