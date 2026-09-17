@@ -12,6 +12,10 @@
  *   npm run dev:local -- 192.168.1.23           # use this IP instead
  *   npm run dev:local -- --port 4001            # backend on a different port
  *   LOCAL_API_PORT=4001 npm run dev:local        # same, via env var
+ *   npm run dev:local -- --dev-client           # connect to a custom dev
+ *                                                # client build instead of
+ *                                                # Expo Go (needed for the
+ *                                                # Android Google Maps view)
  */
 const { networkInterfaces } = require("node:os");
 const { spawn } = require("node:child_process");
@@ -43,20 +47,23 @@ function detectLanIp() {
 function parseArgs(argv) {
   let host = null;
   let port = process.env.LOCAL_API_PORT || "4000";
+  let devClient = false;
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === "--port") {
       port = argv[++i];
     } else if (arg === "--host") {
       host = argv[++i];
+    } else if (arg === "--dev-client") {
+      devClient = true;
     } else if (!arg.startsWith("--")) {
       host = arg;
     }
   }
-  return { host, port };
+  return { host, port, devClient };
 }
 
-const { host: explicitHost, port } = parseArgs(process.argv.slice(2));
+const { host: explicitHost, port, devClient } = parseArgs(process.argv.slice(2));
 
 let host = explicitHost;
 if (!host) {
@@ -88,7 +95,11 @@ console.log(
     "Razorpay checkout without also tunnelling it (e.g. ngrok).",
 );
 
-const child = spawn("npx", ["expo", "start"], {
+// Defaults to Expo Go (--go), same as the plain `start`/`android`/`ios`
+// scripts — once expo-dev-client is installed, `expo start` on its own
+// assumes a custom dev client build. Pass --dev-client once that build
+// exists on the phone and this should connect to it instead.
+const child = spawn("npx", ["expo", "start", ...(devClient ? [] : ["--go"])], {
   stdio: "inherit",
   env: { ...process.env, EXPO_PUBLIC_API_URL: apiUrl },
 });

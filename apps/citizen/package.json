@@ -4,10 +4,11 @@
   "private": true,
   "main": "expo-router/entry",
   "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
+    "start": "expo start --go",
+    "android": "expo start --android --go",
+    "ios": "expo start --ios --go",
     "dev:local": "node scripts/start-local.js",
+    "start:dev-client": "expo start",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
@@ -16,6 +17,7 @@
     "@react-native-community/netinfo": "12.0.1",
     "expo": "^57.0.0",
     "expo-constants": "~57.0.17",
+    "expo-dev-client": "~57.0.18",
     "expo-linking": "~57.0.9",
     "expo-location": "~57.0.16",
     "expo-router": "~57.0.20",
@@ -23,7 +25,6 @@
     "expo-status-bar": "~57.0.1",
     "react": "19.3.0",
     "react-native": "0.86.3",
-    "react-native-maps": "1.27.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-webview": "13.16.1"
@@ -31,5 +32,10 @@
   "devDependencies": {
     "@types/react": "~19.2.4",
     "typescript": "~6.0.3"
+  },
+  "expo": {
+    "install": {
+      "exclude": ["react"]
+    }
   }
 }
