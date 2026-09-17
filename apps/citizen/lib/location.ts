@@ -1,6 +1,11 @@
 import * as React from "react";
 import * as Location from "expo-location";
 
+// Re-exported so a screen can decide "have I moved far enough to bother
+// re-fetching" without this file and the caller each importing their own copy
+// of the same haversine formula.
+export { distanceMetres } from "@kmcp/api";
+
 export interface Fix {
   lat: number;
   lng: number;
@@ -35,9 +40,48 @@ export const KOLKATA: Fix = { lat: 22.5726, lng: 88.3639, accuracy: null };
  * A denial is a first-class state, not an error. It is a perfectly reasonable
  * thing for somebody to do, and every screen that uses this has to keep working
  * afterwards.
+ *
+ * `watch` turns this from a single fix into a live one: once permission is
+ * granted, a subscription keeps `fix` current as the phone moves, throttled to
+ * at most once every five seconds or fifteen metres — enough to notice "I have
+ * walked to a different block", not so much that it drains the battery or
+ * re-renders the map on every step. The blue dot on the map itself already
+ * moves live regardless (that is `MapView`'s own `showsUserLocation`, driven
+ * natively) — this is what lets the *app* — the nearby-zones query, the "how
+ * far away" figures — notice the same thing.
  */
-export function useLocation(auto = true): LocationState & { locate: () => Promise<Fix | null> } {
+export function useLocation(
+  auto = true,
+  watch = false,
+): LocationState & { locate: () => Promise<Fix | null> } {
   const [state, setState] = React.useState<LocationState>({ status: "idle" });
+  const subscription = React.useRef<Location.LocationSubscription | null>(null);
+
+  const stopWatching = React.useCallback(() => {
+    subscription.current?.remove();
+    subscription.current = null;
+  }, []);
+
+  const startWatching = React.useCallback(async () => {
+    stopWatching();
+    subscription.current = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 5000,
+        distanceInterval: 15,
+      },
+      (position) => {
+        setState({
+          status: "ready",
+          fix: {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy ?? null,
+          },
+        });
+      },
+    );
+  }, [stopWatching]);
 
   const locate = React.useCallback(async (): Promise<Fix | null> => {
     setState({ status: "locating" });
@@ -58,6 +102,12 @@ export function useLocation(auto = true): LocationState & { locate: () => Promis
         accuracy: position.coords.accuracy ?? null,
       };
       setState({ status: "ready", fix });
+
+      // A single fix answered "where am I right now"; a live one keeps that
+      // answer true. Started here, once, rather than from its own effect, so
+      // a watch never starts ahead of permission actually being granted.
+      if (watch) void startWatching();
+
       return fix;
     } catch (error) {
       setState({
@@ -66,11 +116,16 @@ export function useLocation(auto = true): LocationState & { locate: () => Promis
       });
       return null;
     }
-  }, []);
+  }, [watch, startWatching]);
 
   React.useEffect(() => {
     if (auto) void locate();
-  }, [auto, locate]);
+    return stopWatching;
+    // Deliberately only on mount — `locate` is stable per `watch`'s own
+    // identity already, and re-running this because `locate` was recreated
+    // would restart the whole permission dance on an unrelated re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto]);
 
   return { ...state, locate };
 }

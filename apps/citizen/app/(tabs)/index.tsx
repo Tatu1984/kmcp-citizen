@@ -1,5 +1,8 @@
 import * as React from "react";
 import {
+  Animated,
+  Dimensions,
+  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,8 +18,7 @@ import { Button, Chip, Loading, Sub, Swatch } from "../../components/ui";
 import { ParkMap } from "../../components/park-map";
 import { availabilityColour, availabilityTone, availabilityWord } from "../../lib/availability";
 import { api } from "../../lib/api";
-import { KOLKATA, formatDistance, useLocation, walkMinutes } from "../../lib/location";
-import { canRenderMap } from "../../lib/maps";
+import { KOLKATA, distanceMetres, formatDistance, useLocation, walkMinutes } from "../../lib/location";
 import { useSession } from "../../lib/session";
 import { rememberZones } from "../../lib/zone-cache";
 import { theme } from "../../lib/theme";
@@ -28,20 +30,20 @@ import { theme } from "../../lib/theme";
  * `GET /zones/nearby` is the single public route on the whole API. Somebody who
  * has just installed this gets a real answer before being asked for anything.
  *
- * It has to survive three separate absences and none of them is unlikely:
+ * It has to survive two separate absences and neither is unlikely:
  *
  *  - **No location.** Declining the prompt is ordinary. The map falls back to
  *    the centre of Kolkata and says so, rather than refusing to draw.
- *  - **No API key.** Android draws a blank grey square without one, so the map
- *    surface is replaced by an explanation and the sheet becomes the whole
- *    screen — every car park is still listed, with every figure.
  *  - **No signal.** An error with a retry, never an empty list presented as
  *    "there is nowhere to park".
  */
 export default function MapScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const location = useLocation();
+  // `watch: true` — the fix stays live as the person walks, not just at the
+  // moment the screen opened, so "car parks near me" still means that five
+  // minutes later.
+  const location = useLocation(true, true);
   const { user } = useSession();
 
   const [zones, setZones] = React.useState<NearbyZone[] | null>(null);
@@ -49,6 +51,8 @@ export default function MapScreen() {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
   const [firstPlate, setFirstPlate] = React.useState<string | null>(null);
+
+  const sheet = useDraggableSheet();
 
   // The shortcut on the finder bar needs one plate, not the whole list — so
   // this is a light read, and a failure of it (signed out, or the route not
@@ -94,11 +98,23 @@ export default function MapScreen() {
     }
   }, []);
 
+  // Where `load` was last actually called from, so a live fix updating every
+  // fifteen metres does not turn into a nearby-zones request every fifteen
+  // metres too. The GPS watcher already throttles the fix itself; this is a
+  // second, coarser throttle on top of it, because "car parks near me" does
+  // not need to be re-asked more often than a person could plausibly have
+  // walked into range of a different one.
+  const lastQueried = React.useRef<{ lat: number; lng: number } | null>(null);
+  const REQUERY_METRES = 200;
+
   // Wait for the location attempt to settle before asking — a first request
   // from the centre of the city followed a second later by one from where the
   // person actually is makes the list jump under their thumb.
   React.useEffect(() => {
     if (locating) return;
+    const last = lastQueried.current;
+    if (last && distanceMetres(last, fix) < REQUERY_METRES) return;
+    lastQueried.current = { lat: fix.lat, lng: fix.lng };
     void load(fix.lat, fix.lng);
   }, [locating, fix.lat, fix.lng, load]);
 
@@ -170,47 +186,69 @@ export default function MapScreen() {
       </View>
 
       {/* ---------------------------------------------------- bottom sheet */}
-      <View
-        style={[
-          styles.sheet,
-          { paddingBottom: insets.bottom + theme.space(1) },
-          !canRenderMap && styles.sheetTall,
-        ]}
-      >
-        <View style={styles.grabber} />
+      <Animated.View style={[styles.sheet, { height: sheet.height }]}>
+        <View style={styles.handle} {...sheet.panHandlers}>
+          <View style={styles.grabber} />
 
-        <View style={styles.legend}>
-          {(["AVAILABLE", "LIMITED", "FULL"] as const).map((state) => (
-            <View key={state} style={styles.legendItem}>
-              <Swatch colour={availabilityColour(state)} />
-              <Text style={styles.legendLabel}>{availabilityWord[state]}</Text>
-            </View>
-          ))}
+          <View style={styles.legend}>
+            {(["AVAILABLE", "LIMITED", "FULL"] as const).map((state) => (
+              <View key={state} style={styles.legendItem}>
+                <Swatch colour={availabilityColour(state)} />
+                <Text style={styles.legendLabel}>{availabilityWord[state]}</Text>
+              </View>
+            ))}
+          </View>
         </View>
 
-        {selected ? (
-          <SelectedZone zone={selected} onOpen={() => router.push(`/zone/${selected.id}`)} />
-        ) : (
-          <ZoneList
-            zones={filtered}
-            error={error}
-            filtering={query.trim().length > 0}
-            locating={locating}
-            denied={location.status === "denied"}
-            onRetry={() => void load(fix.lat, fix.lng)}
-            onSelect={setSelectedId}
-          />
-        )}
-      </View>
+        <View style={[styles.sheetBody, { paddingBottom: insets.bottom + theme.space(1) }]}>
+          {selected ? (
+            <SelectedZone
+              zone={selected}
+              onOpen={() => router.push(`/zone/${selected.id}`)}
+              onBack={() => setSelectedId(null)}
+            />
+          ) : (
+            <ZoneList
+              zones={filtered}
+              error={error}
+              filtering={query.trim().length > 0}
+              locating={locating}
+              denied={location.status === "denied"}
+              onRetry={() => void load(fix.lat, fix.lng)}
+              onSelect={setSelectedId}
+            />
+          )}
+        </View>
+      </Animated.View>
     </View>
   );
 }
 
 /** The selected car park, as the sheet in the design draws it. */
-function SelectedZone({ zone, onOpen }: { zone: NearbyZone; onOpen: () => void }) {
+function SelectedZone({
+  zone,
+  onOpen,
+  onBack,
+}: {
+  zone: NearbyZone;
+  onOpen: () => void;
+  /** Clears the selection — the way back to every nearby car park, not just this one. */
+  onBack: () => void;
+}) {
   const walk = walkMinutes(zone.distanceMetres);
   return (
     <>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Back to all car parks"
+        onPress={onBack}
+        hitSlop={8}
+        style={({ pressed }) => [styles.back, pressed && styles.backPressed]}
+      >
+        <Text style={styles.backGlyph}>‹</Text>
+        <Text style={styles.backLabel}>All car parks</Text>
+      </Pressable>
+
       <View style={styles.selectedHead}>
         <View style={styles.selectedText}>
           <Text style={styles.selectedName}>{zone.name}</Text>
@@ -313,6 +351,84 @@ function ZoneList({
   );
 }
 
+/** Fraction of the screen the sheet occupies at each resting point. */
+const SHEET_PEEK = 0.15;
+const SHEET_DEFAULT = 0.42;
+const SHEET_FULL = 0.86;
+
+/**
+ * The drag itself.
+ *
+ * Built on `Animated` + `PanResponder` — both ship with React Native, so a
+ * single draggable sheet does not need `react-native-gesture-handler` and
+ * `react-native-reanimated` pulled in just for it, the same call this app
+ * already makes about icon packages and other small dependencies.
+ *
+ * The sheet's height is the animated value, not its position — simpler to
+ * reason about than translating a fixed-height panel, and it means the
+ * content inside never has to know it is being dragged at all.
+ */
+function useDraggableSheet() {
+  const screenHeight = Dimensions.get("window").height;
+  const snaps = React.useMemo(
+    () => ({
+      peek: Math.round(screenHeight * SHEET_PEEK),
+      default: Math.round(screenHeight * SHEET_DEFAULT),
+      full: Math.round(screenHeight * SHEET_FULL),
+    }),
+    [screenHeight],
+  );
+
+  const height = React.useRef(new Animated.Value(snaps.default)).current;
+  // The value read at the start of a drag, so each move computes from a fixed
+  // point rather than compounding against whatever the listener last saw —
+  // `Animated.Value` has no synchronous getter, only `stopAnimation`'s callback.
+  const startHeight = React.useRef(snaps.default);
+
+  const snapTo = React.useCallback(
+    (target: number) => {
+      Animated.spring(height, {
+        toValue: target,
+        useNativeDriver: false,
+        bounciness: 4,
+        speed: 14,
+      }).start();
+    },
+    [height],
+  );
+
+  const panHandlers = React.useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_evt, gesture) => Math.abs(gesture.dy) > 4,
+        onPanResponderGrant: () => {
+          height.stopAnimation((value) => {
+            startHeight.current = value;
+          });
+        },
+        onPanResponderMove: (_evt, gesture) => {
+          const next = clamp(startHeight.current - gesture.dy, snaps.peek, snaps.full);
+          height.setValue(next);
+        },
+        onPanResponderRelease: (_evt, gesture) => {
+          const released = clamp(startHeight.current - gesture.dy, snaps.peek, snaps.full);
+          const nearest = [snaps.peek, snaps.default, snaps.full].reduce((closest, point) =>
+            Math.abs(point - released) < Math.abs(closest - released) ? point : closest,
+          );
+          snapTo(nearest);
+        },
+      }).panHandlers,
+    [height, snapTo, snaps],
+  );
+
+  return { height, panHandlers };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: theme.colour.mapGround },
 
@@ -365,20 +481,23 @@ const styles = StyleSheet.create({
     backgroundColor: theme.colour.bg,
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
-    paddingHorizontal: theme.space(2),
-    paddingTop: theme.space(1.5),
-    gap: theme.space(1.25),
-    maxHeight: "62%",
+    overflow: "hidden",
     shadowColor: "#0E1726",
     shadowOpacity: 0.16,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: -6 },
     elevation: 8,
   },
-  // With no map behind it there is nothing to see underneath, so the list gets
-  // the room the map was occupying.
-  sheetTall: { maxHeight: "78%" },
 
+  // The draggable region — kept separate from the scrollable content below it
+  // so a drag started here can never be mistaken for a list scroll, and a
+  // list scroll can never accidentally resize the sheet.
+  handle: {
+    paddingHorizontal: theme.space(2),
+    paddingTop: theme.space(1.5),
+    paddingBottom: theme.space(1),
+    gap: theme.space(1.25),
+  },
   grabber: {
     width: 38,
     height: 4,
@@ -387,9 +506,30 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
 
+  sheetBody: {
+    flex: 1,
+    paddingHorizontal: theme.space(2),
+    gap: theme.space(1.25),
+  },
+
   legend: { flexDirection: "row", gap: theme.space(1.5) },
   legendItem: { flexDirection: "row", alignItems: "center", gap: theme.space(0.5) },
   legendLabel: { fontSize: 11.5, fontWeight: "600", color: theme.colour.muted },
+
+  back: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 2,
+    marginBottom: theme.space(0.25),
+    marginLeft: -theme.space(0.5),
+    paddingVertical: theme.space(0.5),
+    paddingHorizontal: theme.space(0.5),
+    borderRadius: theme.radius.pill,
+  },
+  backPressed: { backgroundColor: theme.colour.raise },
+  backGlyph: { fontSize: 20, fontWeight: "700", color: theme.colour.primary, lineHeight: 20 },
+  backLabel: { fontSize: 14.5, fontWeight: "600", color: theme.colour.primary },
 
   selectedHead: {
     flexDirection: "row",
@@ -402,7 +542,7 @@ const styles = StyleSheet.create({
   selectedMeta: { fontSize: 13.5, color: theme.colour.muted },
 
   denied: { fontSize: 12.5, color: theme.colour.muted },
-  list: { flexGrow: 0 },
+  list: { flex: 1 },
   listContent: { paddingBottom: theme.space(1) },
   listRow: {
     minHeight: 58,

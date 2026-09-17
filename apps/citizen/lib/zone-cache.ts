@@ -4,17 +4,14 @@ import type { Availability, CachedZone, GeoPolygon, NearbyZone, SlotType } from 
 /**
  * The car parks the map last fetched, kept in memory for the screen after it.
  *
- * This exists because of a specific hole in the API rather than for speed.
- * `GET /zones/nearby` is public and returns a car park's name, hours, capacity
- * and live availability; `GET /zones/:id`, which would return the same plus the
- * boundary, is behind `zone.read` and answers 403 to a citizen. So the detail
- * screen cannot fetch the zone it is about — but the map already has it, and
- * handing it over is both correct and free.
+ * This exists for speed, not because of a hole in the API — `GET /zones/nearby`
+ * now returns a car park's name, hours, capacity, live availability and its
+ * real boundary, everything the detail screen needs. Handing over what the map
+ * already fetched is free; a cold start with no map fetch behind it falls
+ * through to `zones.byId` (`GET /zones/:id`), which citizens may call too.
  *
  * In memory only, and deliberately. Occupancy is the whole point of these
- * figures, and a stale one sends somebody to a full car park. A cold start with
- * no map fetch behind it falls through to `zones.byId`, which fails until that
- * endpoint opens up, and the screen says so rather than guessing.
+ * figures, and a stale one sends somebody to a full car park.
  */
 
 /**
@@ -66,7 +63,7 @@ function fromNearby(zone: NearbyZone): ZoneView {
     occupied: zone.occupied,
     available: zone.available,
     availability: zone.availability,
-    boundary: null,
+    boundary: zone.boundary,
   };
 }
 

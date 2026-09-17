@@ -9,6 +9,8 @@
  * anywhere in this platform, and adding one here would be the place it starts.
  */
 
+import type { GeoPolygon } from "./geo";
+
 export type Paise = number;
 
 export interface ApiEnvelope<T> {
@@ -365,6 +367,8 @@ export interface NearbyZone {
   openTime: string;
   closeTime: string;
   allowedVehicleTypeIds: SlotType[];
+  /** The lot's real footprint. Draw this instead of a generic dot when present. */
+  boundary: GeoPolygon | null;
   ward: { name: string } | null;
   street: { name: string } | null;
   occupied: number;
