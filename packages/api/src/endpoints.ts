@@ -22,6 +22,8 @@ import type {
   Payment,
   PlateLookup,
   Session,
+  SessionQuote,
+  SessionStatus,
   Shift,
   Slot,
   SlotSummary,
@@ -160,9 +162,8 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
       /**
        * One zone in full, boundary included.
        *
-       * Guarded by `zone.read`, which a citizen does not hold — see
-       * `gaps.ts`. Wired anyway, because the day a public zone view exists
-       * this is the call the car park screen already makes.
+       * Takes `zone.read` *or* `zone.read.public`, the second of which a
+       * citizen now holds — so this answers, where it used to 403.
        */
       byId: (zoneId: string) => client.get<CachedZone>(`/zones/${encodeURIComponent(zoneId)}`),
 
@@ -194,6 +195,30 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
 
       /** One session by its human-quotable code, or its id. */
       get: (idOrCode: string) => client.get<Session>(`/sessions/${encodeURIComponent(idOrCode)}`),
+
+      /**
+       * What this session costs if it ends now.
+       *
+       * The only fare either app may put on screen while a car is still
+       * parked. It comes from the server's own engine, against the tariff that
+       * is live for that zone, so a peak rule, the daily cap, a holiday and a
+       * pass are all already in it — which is exactly the promise a handset
+       * multiplying an hourly rate by an elapsed time cannot make. That is why
+       * this supersedes `estimateFare`: the offline estimate exists for an
+       * attendant with no signal who must still collect cash, not for a citizen
+       * screen that can simply ask.
+       *
+       * `provisional` is true while the figure can still grow. A session that
+       * has stopped running answers with its stored fare and is never
+       * re-priced, so there is nothing about it left to poll.
+       *
+       * Reachable by a citizen: the route takes `session.read` *or*
+       * `session.read.own`, and the server then refuses any session whose
+       * vehicle is not theirs with a 403 — the permission answers "may you call
+       * this", not "may you see this row".
+       */
+      quote: (idOrCode: string) =>
+        client.get<SessionQuote>(`/sessions/${encodeURIComponent(idOrCode)}/quote`),
 
       /**
        * Everything this attendant started since midnight, ended or not.
@@ -280,9 +305,9 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
        * point: a handset that could name its own figure is a handset that can
        * decide what parking costs.
        *
-       * Guarded by `session.read` today, which a citizen does not hold, so
-       * this answers 403 until a citizen-scoped payment route exists. See
-       * `MISSING.payment`.
+       * Reachable by a citizen now: `/payments/collect` takes `session.read`
+       * *or* `session.read.own`, and the server checks the session is theirs.
+       * It answered 403 to every citizen when these screens were written.
        */
       payOwnSession: (sessionId: string, mode: "UPI_INTENT" | "UPI_QR" = "UPI_INTENT") =>
         client.post<Payment>("/payments/collect", {
@@ -312,85 +337,128 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
      * an app that has to name whose sessions it wants is an app one query
      * parameter away from reading somebody else's.
      *
-     * Only `profile` works today. The rest are typed against routes that do
-     * not exist yet; the tables behind all of them do, and each one is a
-     * scoped read over indexes that are already there. `MISSING` in
-     * `gaps.ts` names them, and every screen that calls one says on screen
-     * that it is waiting rather than showing an empty list as if it were the
-     * truth.
+     * These are built and a citizen may call all of them — the `/me`
+     * controller carries no `@RequirePermissions` at all, because the token is
+     * the scope. The comments here used to say NOT BUILT of every one of them,
+     * which was true when the screens were written and is now the more
+     * dangerous kind of wrong: copy that tells a driver their history "is not
+     * built" while the server is answering with it.
      */
     me: {
-      /** Real, and the only authenticated call a citizen can make today. */
       profile: () => client.get<CitizenProfile>("/auth/me"),
 
-      /** NOT BUILT — `GET /me/vehicles`. See `MISSING.myVehicles`. */
       vehicles: () => client.get<MyVehicle[]>("/me/vehicles"),
 
-      /** NOT BUILT — `POST /me/vehicles`. See `MISSING.myVehicles`. */
+      /**
+       * Registers a plate to this account, or claims one nobody owns.
+       *
+       * Claiming matters more than creating: an attendant starts sessions for
+       * plates whose owner has never opened the app, so adding the plate hands
+       * the citizen the history already sitting on it. A plate already owned by
+       * another account is refused with `DUPLICATE_RESOURCE`.
+       */
       addVehicle: (plateNumber: string, vehicleType: SlotType) =>
         client.post<MyVehicle>("/me/vehicles", { plateNumber, vehicleType }),
 
-      /** NOT BUILT — `DELETE /me/vehicles/:id`. See `MISSING.myVehicles`. */
+      /**
+       * Releases a plate rather than deleting it. The sessions, payments and
+       * receipts on it stay exactly as they were — only this account's claim
+       * over the plate is withdrawn — so re-adding the same plate gets the
+       * whole history back.
+       */
       removeVehicle: (vehicleId: string) =>
         client.delete<void>(`/me/vehicles/${encodeURIComponent(vehicleId)}`),
 
       /**
-       * NOT BUILT — `GET /me/sessions`. See `MISSING.mySessions`.
+       * This citizen's parking, newest first.
        *
-       * Both the History screen and "where is my car" read this. Passing
-       * `status: "ACTIVE"` is how the app finds a car an attendant has
-       * started a session for; a citizen never starts one themselves.
+       * The History screen reads this. It is the wrong call for "is my car
+       * parked right now" — see `activeSessions` for why — but the right one
+       * for a session that has just ended, which no longer appears in the live
+       * list at all.
        */
-      sessions: (status?: "ACTIVE" | "COMPLETED") =>
+      sessions: (status?: SessionStatus) =>
         client.get<MySession[]>("/me/sessions", { query: { status, pageSize: 50 } }),
 
-      /** NOT BUILT — `GET /me/summary`. The two figures at the top of History. */
+      /**
+       * What this citizen is parked in right now: ACTIVE *and* OVERSTAY.
+       *
+       * Not `sessions("ACTIVE")`, and the difference is not cosmetic. `?status=`
+       * takes a single value, and the overstay sweep promotes a live session
+       * from ACTIVE to OVERSTAY with no warning — so an app polling for ACTIVE
+       * watched its own session disappear six hours in, at the moment the
+       * driver most needed to see it. Both statuses mean one thing to the person
+       * who parked: the car is still there.
+       *
+       * A list rather than one session, because a citizen may own several
+       * vehicles and have two of them parked at once; answering with one row
+       * would hide a car. Newest first, unpaginated.
+       */
+      activeSessions: () => client.get<MySession[]>("/me/sessions/active"),
+
+      /**
+       * Attaches the session on the ticket to this account, from the code an
+       * attendant can read out.
+       *
+       * The way in for a driver who never registered their plate. A citizen's
+       * parking is reached through the vehicle's owner, so until the plate is
+       * theirs the bay, the timer and the fare exist and belong to nobody. The
+       * claim takes ownership of the plate as well as returning this session,
+       * which is the part worth telling the citizen: every future session on
+       * that car then links by itself.
+       *
+       * Three refusals worth telling apart by `ApiError.code`, because a driver
+       * can act on each differently:
+       *  - `NOT_FOUND` — no session carries that code.
+       *  - `SESSION_NOT_ACTIVE` — cancelled, or it ended too long ago to claim.
+       *  - `DUPLICATE_RESOURCE` — the plate is already another account's. The
+       *    server's message deliberately does not say whose, and neither should
+       *    anything built on top of it.
+       */
+      claimSession: (code: string) => client.post<MySession>("/me/sessions/claim", { code }),
+
+      /** The two figures at the top of History, totalled by the server. */
       summary: (month?: string) =>
         client.get<MySpendSummary>("/me/summary", { query: { month } }),
 
-      /** NOT BUILT — `GET /me/payments`. See `MISSING.myPayments`. */
       payments: () => client.get<Payment[]>("/me/payments", { query: { pageSize: 50 } }),
 
-      /** NOT BUILT — `GET /me/favourites`. The `Favourite` model already exists. */
       favourites: () => client.get<Favourite[]>("/me/favourites"),
 
-      /** NOT BUILT — `POST /me/favourites`. See `MISSING.favourites`. */
+      /** Idempotent on `[userId, zoneId]` — saving an already-saved zone is not a refusal. */
       addFavourite: (zoneId: string, label = "SAVED") =>
         client.post<Favourite>("/me/favourites", { zoneId, label }),
 
-      /** NOT BUILT — `DELETE /me/favourites/:zoneId`. */
       removeFavourite: (zoneId: string) =>
         client.delete<void>(`/me/favourites/${encodeURIComponent(zoneId)}`),
 
-      /** NOT BUILT — `GET /me/passes`. The `Pass` model exists and carries a QR. */
       passes: () => client.get<MyPass[]>("/me/passes"),
     },
 
     /**
-     * The wallet. None of this exists on the server in any form.
+     * The wallet, which now exists: `me/wallet` is its own controller under the
+     * `/me` tree and, like the rest of that tree, needs no permission — the
+     * token is the scope.
      *
-     * `WALLET` is a value in the `PaymentMode` enum and nothing else — there
-     * is no balance column, no ledger table, no top-up and no refund path. The
-     * shapes are written down here because the screens had to be built against
-     * something, and because the arrangement matters: `balance()` is a derived
-     * figure the server computes from `entries()`, never a mutable number this
+     * The arrangement is the part worth keeping written down: `balance()` is a
+     * figure the server derives from `entries()`, never a mutable number this
      * client adds to. A wallet whose balance is stored rather than derived is a
      * wallet whose disputes cannot be answered.
      *
-     * Worth knowing before any of it is written: holding citizens' money makes
-     * KMC a prepaid instrument issuer under RBI's rules. That is a decision for
-     * whoever owns the contract.
+     * Still worth knowing, because shipping the routes did not settle it:
+     * holding citizens' money makes KMC a prepaid instrument issuer under RBI's
+     * rules. That is a decision for whoever owns the contract.
      */
     wallet: {
-      /** NOT BUILT — `GET /me/wallet`. See `MISSING.wallet`. */
+      /** `GET /me/wallet` — the derived balance. */
       balance: () => client.get<WalletBalance>("/me/wallet"),
 
-      /** NOT BUILT — `GET /me/wallet/entries`. The ledger, newest first. */
+      /** `GET /me/wallet/entries` — the ledger, newest first. */
       entries: () =>
         client.get<WalletEntry[]>("/me/wallet/entries", { query: { pageSize: 50 } }),
 
       /**
-       * NOT BUILT — `POST /me/wallet/topups`.
+       * `POST /me/wallet/topups`.
        *
        * Returns an order to pay, not a new balance: the credit is written when
        * the gateway's webhook arrives, so that money is never in the wallet
@@ -399,7 +467,7 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
       topUp: (amount: Paise) => client.post<WalletTopUp>("/me/wallet/topups", { amount }),
 
       /**
-       * NOT BUILT — `POST /me/wallet/payments`.
+       * `POST /me/wallet/payments`.
        *
        * Debits the wallet for a session the server prices. No amount is sent,
        * for the same reason it is not sent to `/payments/collect`.
@@ -412,13 +480,10 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
     },
 
     passes: {
-      /**
-       * Season-ticket plans. The route exists but is guarded by `tariff.read`,
-       * so a citizen is refused — one more door to open, not one to build.
-       */
+      /** Season-ticket plans. `@Public()` on the server — no account needed to read them. */
       plans: () => client.get<PassPlan[]>("/pass-plans", { query: { pageSize: 50 } }),
 
-      /** NOT BUILT — `POST /me/passes`. See `MISSING.passPurchase`. */
+      /** `POST /me/passes`, which exists: buying a pass also claims the plate. */
       purchase: (planId: string, plateNumber: string) =>
         client.post<MyPass>("/me/passes", { planId, plateNumber }),
     },

@@ -28,6 +28,7 @@ export default function RootLayout() {
           <Stack.Screen name="parked/[plate]" options={{ title: "Your car" }} />
           <Stack.Screen name="vehicles" options={{ title: "Your vehicles" }} />
           <Stack.Screen name="passes" options={{ title: "Passes" }} />
+          <Stack.Screen name="scan" options={{ title: "Scan the code" }} />
         </Stack>
       </SessionProvider>
     </SafeAreaProvider>

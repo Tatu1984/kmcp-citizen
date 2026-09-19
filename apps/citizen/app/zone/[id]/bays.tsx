@@ -1,7 +1,7 @@
 import * as React from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
-import { ApiError, MISSING, gapOf, type Slot, type SlotStatus } from "@kmcp/api";
+import { ApiError, gapOf, type Slot, type SlotStatus } from "@kmcp/api";
 
 import { Card, Label, Loading, Screen, Sub, Swatch, Unavailable } from "../../../components/ui";
 import { Bay } from "../../../components/availability";
@@ -45,12 +45,14 @@ export default function Bays() {
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
+        // A refusal from a server that answered is worth saying differently
+        // from a dead connection: only one of the two is fixed by waiting.
         const gap = gapOf(cause);
         setError(
           gap
             ? {
-                title: "Bay-by-bay availability is not public yet",
-                body: `${MISSING.slotList!.because}\n\nNeeds: ${MISSING.slotList!.route}`,
+                title: "The bays could not be read",
+                body: "This car park's bays could not be read for this account. Signing in again usually fixes it.",
               }
             : {
                 title: "Could not load the bays",

@@ -1,27 +1,10 @@
 import * as React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
-import {
-  ApiError,
-  MISSING,
-  formatPlate,
-  gapOf,
-  normalisePlate,
-  type MyVehicle,
-} from "@kmcp/api";
+import { ApiError, formatPlate, gapOf, normalisePlate, type MyVehicle } from "@kmcp/api";
 
-import {
-  Banner,
-  Button,
-  Card,
-  Field,
-  Label,
-  Loading,
-  Plate,
-  Screen,
-  Sub,
-  Unavailable,
-} from "../components/ui";
+import { Banner, Button, Card, Field, Label, Loading, Plate, Screen, Sub } from "../components/ui";
+import { ClaimSession } from "../components/claim-session";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { theme } from "../lib/theme";
@@ -30,20 +13,23 @@ import { theme } from "../lib/theme";
  * The number plates this person says are theirs.
  *
  * A citizen never starts a parking session — an attendant does, at the kerb —
- * so a plate is the only handle the app has on "my car". Registering one is
- * what makes the "find my car" path work at all.
+ * so a plate is the usual handle the app has on "my car". Registering one is
+ * what makes the "find my car" path work by itself, for every session on that
+ * car from now on.
  *
- * Backed by `GET/POST/DELETE /me/vehicles`. If a build lands on a server that
- * has not shipped those yet, the screen says so plainly (via `MISSING.
- * myVehicles`) rather than showing an empty list as if nobody had ever added
- * a plate.
+ * Which is why the session code lives at the bottom of this screen too. This is
+ * where the map sends somebody who has no plate registered, and some of them
+ * are standing at a car that is parked *right now* — asking them to type a
+ * plate correctly before they can see their own bay is a worse deal than
+ * letting them read the code off the ticket. A claim takes ownership of the
+ * plate as well, so the two doors lead to the same place.
  */
 export default function Vehicles() {
   const router = useRouter();
   const { user } = useSession();
 
   const [vehicles, setVehicles] = React.useState<MyVehicle[] | null>(null);
-  const [gap, setGap] = React.useState(false);
+  const [loadError, setLoadError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [input, setInput] = React.useState("");
@@ -53,13 +39,20 @@ export default function Vehicles() {
   const load = React.useCallback(async () => {
     try {
       setVehicles(await api.me.vehicles());
+      setLoadError(null);
     } catch (cause) {
-      if (gapOf(cause)) setGap(true);
-      else {
-        setError(
-          cause instanceof ApiError ? cause.message : "Could not load your vehicles.",
-        );
-      }
+      // `/me/vehicles` is built and needs no permission, so a failure here is
+      // either this account being refused or the connection being down —
+      // `gapOf` tells those apart, and neither of them means the garage is
+      // empty. An empty list shown for a failed read is how somebody concludes
+      // the app has forgotten their car.
+      setLoadError(
+        gapOf(cause)
+          ? "Your vehicles could not be read for this account. Signing in again usually fixes it."
+          : cause instanceof ApiError
+            ? cause.message
+            : "Could not load your vehicles. Check your connection and try again.",
+      );
     }
   }, []);
 
@@ -94,12 +87,11 @@ export default function Vehicles() {
       setVehicles((current) => (current ? [...current, created] : [created]));
       setInput("");
     } catch (cause) {
+      // The server's own message is the useful one here: it is what says the
+      // plate already belongs to another account, and it deliberately does not
+      // say whose.
       setError(
-        gapOf(cause)
-          ? `${MISSING.myVehicles!.because}\n\nNeeds: ${MISSING.myVehicles!.route}`
-          : cause instanceof ApiError
-            ? cause.message
-            : "That vehicle could not be added.",
+        cause instanceof ApiError ? cause.message : "That vehicle could not be added.",
       );
     } finally {
       setAdding(false);
@@ -114,11 +106,7 @@ export default function Vehicles() {
       setVehicles((current) => (current ? current.filter((v) => v.id !== vehicle.id) : current));
     } catch (cause) {
       setError(
-        gapOf(cause)
-          ? `${MISSING.myVehicles!.because}\n\nNeeds: ${MISSING.myVehicles!.route}`
-          : cause instanceof ApiError
-            ? cause.message
-            : "That vehicle could not be removed.",
+        cause instanceof ApiError ? cause.message : "That vehicle could not be removed.",
       );
     } finally {
       setRemovingId(null);
@@ -141,27 +129,22 @@ export default function Vehicles() {
 
   if (loading) return <Loading label="Loading your vehicles" />;
 
-  if (gap) {
-    return (
-      <Screen>
-        <Unavailable
-          title="Vehicles are not readable yet"
-          body={`${MISSING.myVehicles!.because}\n\nNeeds: ${MISSING.myVehicles!.route}`}
-        />
-        {error ? <Banner tone="crit" title={error} /> : null}
-      </Screen>
-    );
-  }
-
   return (
     <Screen>
       <Card raise>
         <Label>Your vehicles</Label>
         <Sub style={styles.body}>
           Add your number plate once. We use it to find your car when an attendant starts a parking
-          session for it.
+          session for it — and the parking already recorded against that plate becomes yours.
         </Sub>
       </Card>
+
+      {loadError ? (
+        <>
+          <Banner tone="crit" title="Could not load your vehicles" body={loadError} />
+          <Button label="Try again" variant="ghost" size="medium" onPress={() => void load()} />
+        </>
+      ) : null}
 
       {error ? <Banner tone="crit" title="That did not go through" body={error} /> : null}
 
@@ -217,6 +200,15 @@ export default function Vehicles() {
           ))}
         </View>
       ) : null}
+
+      {/* The other way in, for somebody whose car is parked this minute and
+          whose plate is not the thing they can most reliably produce. */}
+      <ClaimSession
+        onClaimed={(claimed) => {
+          void load();
+          router.replace(`/parked/${claimed.plateNumber}`);
+        }}
+      />
     </Screen>
   );
 }

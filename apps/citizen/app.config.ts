@@ -19,7 +19,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     },
     android: {
       package: "in.gov.kmc.parking.citizen",
-      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
+      permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION", "CAMERA"],
     },
     plugins: [
       "expo-router",
@@ -29,6 +29,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         {
           locationWhenInUsePermission:
             "KMCP uses your location to show the car parks nearest to you. It is never sent anywhere but the search for nearby bays.",
+        },
+      ],
+      [
+        "expo-camera",
+        {
+          cameraPermission:
+            "KMCP uses the camera to read the parking code an attendant shows you. Nothing is photographed, recorded or sent — the picture is read for a code and discarded.",
+          // No microphone, and no audio permission on Android with it. This
+          // app never records; asking for a microphone to scan a QR code is
+          // the kind of request that gets an app refused outright.
+          recordAudioAndroid: false,
         },
       ],
     ],

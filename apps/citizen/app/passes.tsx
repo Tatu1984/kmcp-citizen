@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import {
   ApiError,
-  MISSING,
   formatMoney,
   formatPlate,
   gapOf,
@@ -47,7 +46,6 @@ export default function Passes() {
   const [plans, setPlans] = React.useState<PassPlan[] | null>(null);
   const [vehicles, setVehicles] = React.useState<MyVehicle[] | null>(null);
   const [passes, setPasses] = React.useState<MyPass[] | null>(null);
-  const [gap, setGap] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
 
@@ -71,15 +69,17 @@ export default function Passes() {
     if (passesResult.status === "fulfilled") setPasses(passesResult.value);
 
     if (plansResult.status === "rejected") {
-      if (gapOf(plansResult.reason)) {
-        setGap(`${MISSING.passPurchase!.because}\n\nNeeds: GET /pass-plans`);
-      } else {
-        setError(
-          plansResult.reason instanceof ApiError
+      // `GET /pass-plans` is public and `POST /me/passes` needs no permission,
+      // so a refusal here is a real failure, not a feature waiting to be
+      // switched on. It is reported without taking the screen over: somebody's
+      // own passes come from a different call and are still worth showing.
+      setError(
+        gapOf(plansResult.reason)
+          ? "Season-ticket plans could not be read for this account. Signing in again usually fixes it."
+          : plansResult.reason instanceof ApiError
             ? plansResult.reason.message
-            : "Could not load season-ticket plans.",
-        );
-      }
+            : "Could not load season-ticket plans. Check your connection and try again.",
+      );
     }
   }, []);
 
@@ -152,10 +152,10 @@ export default function Passes() {
       } catch (cause) {
         setBuyError(
           gapOf(cause)
-            ? `${MISSING.passPurchase!.because}\n\nNeeds: ${MISSING.passPurchase!.route}`
+            ? "The server would not complete this purchase for this account. Signing in again usually fixes it."
             : cause instanceof ApiError
               ? cause.message
-              : "That purchase could not be completed.",
+              : "That purchase could not be completed. Check your connection and try again.",
         );
       } finally {
         setBuyBusy(false);
@@ -179,16 +179,6 @@ export default function Passes() {
   }
 
   if (loading) return <Loading label="Loading passes" />;
-
-  if (gap) {
-    return (
-      <Screen>
-        <Stack.Screen options={{ title: "Passes" }} />
-        <Unavailable title="Season tickets are not switched on yet" body={gap} />
-        {error ? <Banner tone="crit" title={error} /> : null}
-      </Screen>
-    );
-  }
 
   const hasMultipleVehicles = (vehicles?.length ?? 0) > 1;
 
@@ -257,7 +247,7 @@ export default function Passes() {
       {plans === null ? (
         <Unavailable
           title="Plans could not be read"
-          body="This might be a signal problem rather than a real gap — try again in a moment."
+          body="This is most likely a signal problem — try again in a moment."
         />
       ) : plans.length === 0 ? (
         <Sub style={styles.body}>No season-ticket plans are on offer right now.</Sub>

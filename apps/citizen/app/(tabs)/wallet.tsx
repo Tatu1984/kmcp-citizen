@@ -3,7 +3,6 @@ import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import {
   ApiError,
-  MISSING,
   formatMoney,
   gapOf,
   type Paise,
@@ -30,18 +29,28 @@ import { theme } from "../../lib/theme";
 /**
  * The wallet.
  *
- * None of this exists on the server. `WALLET` is a value in the `PaymentMode`
- * enum and nothing else — there is no balance, no ledger table, no top-up and
- * no refund path — so this screen spends most of its life explaining itself.
+ * All of this exists on the server now: `me/wallet` is its own controller under
+ * the `/me` tree — balance, ledger, top-ups and session payments — and like the
+ * rest of that tree it needs no permission, because the token is the scope. The
+ * balance it answers with is derived from the ledger rather than stored, which
+ * is what makes a disputed figure answerable at all.
  *
- * It would have been easy, and wrong, to render the design with zeroes in it: a
- * balance of ₹0.00 and an empty list of transactions is a screen that says "you
- * have no money and have never spent any", which is a specific false claim
- * about somebody's finances rather than an absence of data. Whatever else is
- * uncertain here, this app will not tell a person their money is gone.
+ * This screen used to say none of that was built, and name the route that would
+ * fix it. Copy like that outliving the gap it described is worse than no copy:
+ * it tells somebody their money is nowhere while the server is answering with
+ * the balance. So a failure here is now written as what it is — a failure —
+ * with a way to try again.
  *
- * The layout below is exactly the one the design calls for, and it renders in
- * full the moment `GET /me/wallet` answers.
+ * The one rule that has not changed is the one worth keeping: nothing on this
+ * screen is rendered as a confident zero. A balance of ₹0.00 and an empty list
+ * of transactions is a specific claim about somebody's finances, not an absence
+ * of data, and it is only ever shown when the server actually said so.
+ *
+ * Still worth knowing, because shipping the routes did not settle it: holding
+ * citizens' money — even small amounts, even with no cash-out — makes KMC a
+ * prepaid instrument issuer under RBI's rules. That is a decision for whoever
+ * owns the contract, not a thing to put in front of a driver on a bad
+ * connection.
  */
 
 /** The top-up amounts on the chips. Fixed, and in paise like everything else. */
@@ -53,7 +62,6 @@ export default function Wallet() {
 
   const [balance, setBalance] = React.useState<WalletBalance | null>(null);
   const [entries, setEntries] = React.useState<WalletEntry[] | null>(null);
-  const [gap, setGap] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [chosen, setChosen] = React.useState<Paise>(TOP_UPS[1]!);
@@ -73,16 +81,28 @@ export default function Wallet() {
     if (entriesResult.status === "fulfilled") setEntries(entriesResult.value);
 
     if (balanceResult.status === "rejected") {
-      if (gapOf(balanceResult.reason)) setGap(true);
-      else {
-        setError(
-          balanceResult.reason instanceof ApiError
-            ? balanceResult.reason.message
-            : "Could not load your wallet.",
-        );
-      }
+      // `gapOf` still earns its keep: a definite refusal from a server that
+      // answered is a different problem from a dead connection, and only one of
+      // them is worth trying again. What it no longer means is "not built".
+      const reason = balanceResult.reason;
+      setError(
+        gapOf(reason)
+          ? "Your wallet could not be read for this account. Signing in again usually fixes it."
+          : reason instanceof ApiError
+            ? reason.message
+            : "Could not load your wallet. Check your connection and try again.",
+      );
+    } else {
+      setError(null);
     }
   }, []);
+
+  /** The retry behind the failure state: the spinner comes back while it runs. */
+  const reload = React.useCallback(async () => {
+    setLoading(true);
+    await load();
+    setLoading(false);
+  }, [load]);
 
   React.useEffect(() => {
     if (!user) {
@@ -132,12 +152,17 @@ export default function Wallet() {
       await load();
       setTopUpSuccess(`Added ${formatMoney(topUp.amount, { decimals: false })} to your wallet.`);
     } catch (cause) {
+      // Deliberately says nothing about whether money moved. This catch covers
+      // the whole attempt, checkout included, so a refusal can land after the
+      // gateway has taken the payment — and the credit is written by the
+      // webhook either way. Guessing here is how a screen tells somebody their
+      // money is gone when it is merely late.
       setTopUpError(
         gapOf(cause)
-          ? `${MISSING.wallet!.because}\n\nNeeds: ${MISSING.wallet!.route}`
+          ? "That top-up was refused for this account. Signing in again usually fixes it."
           : cause instanceof ApiError
             ? cause.message
-            : "That top-up could not be completed.",
+            : "That top-up could not be completed. Check your connection and try again.",
       );
     } finally {
       setTopUpBusy(false);
@@ -160,36 +185,26 @@ export default function Wallet() {
 
   if (loading) return <Loading label="Loading your wallet" />;
 
-  if (gap || !balance) {
+  // No balance means the read failed, not that the wallet is missing. Nothing
+  // is shown in its place — a zero here would be a claim about this person's
+  // money that the server never made.
+  if (!balance) {
     return (
       <Screen>
         <Unavailable
-          title="The wallet has not been built yet"
-          body={`${MISSING.wallet!.because}\n\nNeeds: ${MISSING.wallet!.route}`}
+          title="Your wallet could not be loaded"
+          body={
+            error ??
+            "The balance did not come back just now. Check your connection and try again — nothing about your wallet has changed."
+          }
         />
 
-        <Card>
-          <Label>What it takes</Label>
-          <Sub style={styles.body}>
-            Two models and one rule that never bends: the balance is derived from the ledger and
-            never stored as a number anything can edit. A top-up credits on the gateway's webhook, a
-            session debit is a row, and a cancellation writes a compensating row rather than
-            changing the original. That is what makes a balance disputed months later answerable at
-            all.
-          </Sub>
-        </Card>
+        <Button label="Try again" variant="ghost" size="medium" onPress={() => void reload()} />
 
-        <Card>
-          <Label>Worth deciding first</Label>
-          <Sub style={styles.body}>
-            Holding citizens' money — even small amounts, even with no cash-out — puts KMC in a
-            regulated position under RBI's prepaid instrument rules. That is a decision for whoever
-            owns the contract, not something to find out after the ledger is written. Paying per
-            session by UPI avoids it entirely.
-          </Sub>
-        </Card>
-
-        {error ? <Banner tone="crit" title={error} /> : null}
+        <Sub style={styles.body}>
+          Paying by UPI does not go through the wallet, so a car that is parked can still be paid
+          for from its own screen.
+        </Sub>
       </Screen>
     );
   }
@@ -202,6 +217,10 @@ export default function Wallet() {
           title="You are offline"
           body="This balance was last read when you had signal. It may have moved since."
         />
+      ) : error ? (
+        // A balance is already on screen, so this is a refresh that did not
+        // land rather than a screen that failed — the figure stays, labelled.
+        <Banner tone="warn" title="This balance may be a moment out of date" body={error} />
       ) : null}
 
       <Card raise style={styles.balanceCard}>
@@ -254,7 +273,7 @@ export default function Wallet() {
       {entries === null ? (
         <Unavailable
           title="The ledger could not be read"
-          body={`Needs: ${MISSING.wallet!.route}`}
+          body="Your transactions did not come back just now. Check your connection and try again — the balance above is unaffected."
         />
       ) : entries.length === 0 ? (
         <Sub style={styles.body}>

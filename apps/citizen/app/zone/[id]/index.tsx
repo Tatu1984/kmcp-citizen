@@ -3,7 +3,6 @@ import { Linking, StyleSheet, Text, View } from "react-native";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import {
   ApiError,
-  MISSING,
   formatMoney,
   gapOf,
   slotsWith,
@@ -43,10 +42,14 @@ import { recallZone, toZoneView, type ZoneView } from "../../../lib/zone-cache";
  *    booked, and what say which kind of bay is free;
  *  - the **rate card**, which is what the fare rows are.
  *
- * The last two are guarded by permissions a citizen account does not hold, so
- * today they answer 403 and their sections say so by name. That is deliberate:
- * a driver told "we cannot show you the price" will ask somebody; a driver
- * shown ₹0 will park and then argue with an attendant.
+ * All three answer for a citizen now. The bay and tariff sections used to carry
+ * copy naming the permission that shut them out, and that copy has gone: a
+ * failure here is an ordinary failure — signal, server, or a real problem with
+ * the account — not a feature that was never written.
+ *
+ * What has not changed is the rule about zeroes. A section that cannot get its
+ * figures says so. A driver told "we cannot show you the price" will ask
+ * somebody; a driver shown ₹0 will park and then argue with an attendant.
  */
 export default function ZoneDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -82,8 +85,8 @@ export default function ZoneDetail() {
         if (cancelled) return;
         setZoneError(
           gapOf(cause) === "NOT_PERMITTED"
-            ? MISSING.zoneDetail!.because
-            : "Could not load this car park.",
+            ? "This car park could not be read for this account. Signing in again usually fixes it."
+            : "Could not load this car park. Check your connection and try again.",
         );
       });
 
@@ -191,10 +194,10 @@ export default function ZoneDetail() {
     } catch (cause) {
       setFavouriteNote(
         gapOf(cause)
-          ? `${MISSING.favourites!.because}\n\nNeeds: ${MISSING.favourites!.route}`
+          ? "Your saved car parks could not be changed for this account. Signing in again usually fixes it."
           : cause instanceof ApiError
             ? cause.message
-            : `That car park could not be ${was ? "unsaved" : "saved"}.`,
+            : `That car park could not be ${was ? "unsaved" : "saved"}. Check your connection and try again.`,
       );
     } finally {
       setFavouriteBusy(false);
@@ -220,8 +223,8 @@ export default function ZoneDetail() {
     return (
       <Screen>
         <Unavailable
-          title="This car park cannot be opened on its own"
-          body={`${zoneError ?? MISSING.zoneDetail!.because}\n\nOpen it from the map instead. That list comes from the one endpoint a citizen may call.`}
+          title="This car park could not be loaded"
+          body={`${zoneError ?? "Could not load this car park. Check your connection and try again."}\n\nOpening it from the map works too, and does not depend on this.`}
         />
         <Button label="Back to the map" variant="ghost" onPress={() => router.replace("/(tabs)")} />
       </Screen>
@@ -279,10 +282,16 @@ export default function ZoneDetail() {
         <CapacityBar segments={segments} />
         <CapacityKey segments={segments} />
         {!summary ? (
-          <Sub style={styles.note}>
-            Free and occupied come from live sessions. Booked bays are counted separately and are
-            not public yet — needs {MISSING.slotSummary!.route}.
-          </Sub>
+          // Nothing while the bay counts are still in flight — the bar above is
+          // already showing the live-session figures, and the loader below says
+          // the rest is on its way. Once it has settled without them, that is a
+          // failure and gets said out loud.
+          loading ? null : (
+            <Sub style={styles.note}>
+              Free and occupied come from live sessions. The booked count is read separately and
+              did not come back just now — check your connection and try again.
+            </Sub>
+          )
         ) : mapped < zone.capacity ? (
           // Said out loud rather than quietly totalled to the wrong number: a
           // car park priced for 48 vehicles with 30 bays recorded has a bar
@@ -309,10 +318,17 @@ export default function ZoneDetail() {
             />
           ))}
         </Card>
+      ) : slots === null ? (
+        // A read that failed and a car park with no bays on record are different
+        // facts, and only one of them is anybody's fault.
+        <Unavailable
+          title="Bay types could not be read"
+          body="The bay records did not come back just now. Check your connection and try again — the figures above come from live sessions and are unaffected."
+        />
       ) : (
         <Unavailable
-          title="Which kind of bay is free"
-          body={`${MISSING.slotList!.because}\n\nNeeds: ${MISSING.slotList!.route}`}
+          title="No bays are recorded for this car park"
+          body="Its capacity is priced and enforced, but individual bays have not been surveyed and numbered yet. The figures above still show how many spaces are free."
         />
       )}
 
@@ -344,8 +360,8 @@ export default function ZoneDetail() {
         </Sub>
       ) : (
         <Unavailable
-          title="What it costs is not public yet"
-          body={`${MISSING.tariff!.because}\n\nNeeds: ${MISSING.tariff!.route}`}
+          title="What this car park charges could not be read"
+          body="The rate card did not come back just now. Check your connection and try again — this screen will not guess at a price the server sets."
         />
       )}
 

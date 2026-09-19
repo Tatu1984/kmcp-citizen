@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet } from "react-native";
+import { MaterialIcons } from "@expo/vector-icons";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import type { NearbyZone } from "@kmcp/api";
 
@@ -131,7 +132,13 @@ export function ParkMap({
           onPress={recenter}
           style={({ pressed }) => [styles.recenter, pressed && styles.recenterPressed]}
         >
-          <Text style={styles.recenterGlyph}>◎</Text>
+          {/*
+           * Material Design's `my_location` — the icon asked for as
+           * `MdOutlineMyLocation` from `react-icons/md`. `react-icons` renders
+           * DOM `<svg>` elements and so cannot be used here; `@expo/vector-icons`
+           * serves the same Material glyph natively, and works in plain Expo Go.
+           */}
+          <MaterialIcons name="my-location" size={22} color={theme.colour.primary} />
         </Pressable>
       ) : null}
     </>
@@ -309,5 +316,4 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   recenterPressed: { opacity: 0.8 },
-  recenterGlyph: { fontSize: 20, color: theme.colour.primary },
 });

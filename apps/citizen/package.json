@@ -12,10 +12,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
     "@kmcp/api": "*",
     "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/netinfo": "12.0.1",
     "expo": "^57.0.0",
+    "expo-camera": "~57.0.5",
     "expo-constants": "~57.0.17",
     "expo-dev-client": "~57.0.18",
     "expo-linking": "~57.0.9",
@@ -35,7 +37,9 @@
   },
   "expo": {
     "install": {
-      "exclude": ["react"]
+      "exclude": [
+        "react"
+      ]
     }
   }
 }

@@ -442,7 +442,26 @@ export interface MyVehicle {
   isBlacklisted: boolean;
 }
 
-/** One of the citizen's own parking sessions, with what they paid for it. */
+/**
+ * One of the citizen's own parking sessions — the shape `/me/sessions`,
+ * `/me/sessions/active` and `/me/sessions/claim` all answer with.
+ *
+ * It carries two minute counts and they are not interchangeable. Reading the
+ * wrong one is how a screen shows a driver a figure no total was worked out
+ * from:
+ *
+ *  - `durationMinutes` is the span the fare was actually charged on. Null until
+ *    something priced the session, and deliberately not filled in from the
+ *    timestamps, so a duration printed beside a total is always the duration
+ *    that total came from.
+ *  - `elapsedMinutes` is the clock — still counting while the car is there, the
+ *    settled figure once it has left, and never null. It is where a ticking
+ *    timer starts.
+ *
+ * A cancelled session is the case that tells them apart: a real
+ * `elapsedMinutes`, and no `durationMinutes` at all, because it was never
+ * priced.
+ */
 export interface MySession {
   id: string;
   code: string;
@@ -450,12 +469,84 @@ export interface MySession {
   status: SessionStatus;
   startAt: string;
   endAt: string | null;
+  /** The minutes the fare was charged on. Null while live, and on rows never priced. */
   durationMinutes: number | null;
+  /** The running or settled clock. Never null. */
+  elapsedMinutes: number;
+  /**
+   * The server's verdict, never recomputed here. The overstay threshold is zone
+   * configuration held server-side, and a handset that guessed at it would flag
+   * cars the server does not — then disagree with the penalty on the receipt.
+   */
+  isOverstay: boolean;
+  grossAmount: Paise | null;
+  discountAmount: Paise;
+  taxAmount: Paise;
+  penaltyAmount: Paise;
   payableAmount: Paise | null;
+  /**
+   * The stored quote, line by line: what the citizen is shown when they ask
+   * why. Null on a session that was never priced — a cancelled one, and rows
+   * recorded before the breakdown was persisted — which is why every screen
+   * that reads it has to have an answer for null rather than reaching straight
+   * for `.lines`.
+   */
+  fareBreakdown: Quote | null;
   refundedAmount: Paise;
   zone: { id: string; code: string; name: string };
+  /**
+   * The bay an attendant allocated — the answer to the only question a driver
+   * walking back to their car is actually asking. Null where the zone has no
+   * numbered bays, which is most of them, and on sessions started before bays
+   * were mapped: in that case the vehicle is booked to the zone and not to a
+   * bay, and saying so is not the same as saying nothing.
+   */
+  slot: { id: string; code: string; type: SlotType } | null;
+  vehicleType: { code: SlotType; label: string };
   payment: { id: string; mode: PaymentMode; status: string } | null;
   receipt: { id: string; number: string; issuedAt: string } | null;
+}
+
+/**
+ * What `GET /sessions/:id/quote` answers: what this session costs if it ends
+ * now.
+ *
+ * The only fare either app may show while a car is still parked, and the reason
+ * a citizen screen no longer has to refuse the question. It is priced by the
+ * server's own engine against the tariff that is live — peak rules, the daily
+ * cap, holidays and passes are all already in it — so it is a figure the server
+ * stands behind rather than a handset multiplying a rate by an elapsed time and
+ * hoping.
+ *
+ * `provisional` says which of the two things you are holding. True while the
+ * car is still there and the number can still grow; false once the session has
+ * stopped running, at which point this is the stored fare read back and the
+ * money can no longer move. Nothing should poll a settled quote.
+ *
+ * `quotedAt` is the instant the figure was worked out — now for a live session,
+ * the session's `endAt` for a settled one — so a number on screen can always be
+ * dated.
+ */
+export interface SessionQuote {
+  sessionId: string;
+  code: string;
+  status: SessionStatus;
+  zone: { id: string; code: string; name: string };
+  slot: { id: string; code: string; type: SlotType } | null;
+  vehicleType: { code: SlotType; label: string };
+  startAt: string;
+  endAt: string | null;
+  elapsedMinutes: number;
+  isOverstay: boolean;
+  provisional: boolean;
+  quotedAt: string | null;
+  grossAmount: Paise | null;
+  discountAmount: Paise;
+  taxAmount: Paise;
+  penaltyAmount: Paise;
+  payableAmount: Paise | null;
+  /** Null only on a settled session that was never priced — a cancelled one, or a legacy row. */
+  quote: Quote | null;
 }
 
 /** The figures at the top of the History screen, totalled by the server. */

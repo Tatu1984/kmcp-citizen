@@ -10,14 +10,23 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { ApiError, formatPlate, type NearbyZone } from "@kmcp/api";
+import {
+  ApiError,
+  formatDuration,
+  formatMoney,
+  formatPlate,
+  type MySession,
+  type NearbyZone,
+  type Paise,
+} from "@kmcp/api";
 
 import { Button, Chip, Loading, Sub, Swatch } from "../../components/ui";
 import { ParkMap } from "../../components/park-map";
 import { availabilityColour, availabilityTone, availabilityWord } from "../../lib/availability";
 import { api } from "../../lib/api";
+import { elapsedMinutesSince, useNow } from "../../lib/elapsed";
 import { KOLKATA, distanceMetres, formatDistance, useLocation, walkMinutes } from "../../lib/location";
 import { useSession } from "../../lib/session";
 import { rememberZones } from "../../lib/zone-cache";
@@ -51,30 +60,82 @@ export default function MapScreen() {
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [query, setQuery] = React.useState("");
   const [firstPlate, setFirstPlate] = React.useState<string | null>(null);
+  const [parked, setParked] = React.useState<MySession | null>(null);
+  const [fare, setFare] = React.useState<Paise | null>(null);
 
   const sheet = useDraggableSheet();
 
-  // The shortcut on the finder bar needs one plate, not the whole list — so
-  // this is a light read, and a failure of it (signed out, or the route not
-  // yet built) just falls back to "add your plate" rather than an error.
-  React.useEffect(() => {
-    if (!user) {
-      setFirstPlate(null);
-      return;
-    }
-    let cancelled = false;
-    void api.me
-      .vehicles()
-      .then((found) => {
-        if (!cancelled) setFirstPlate(found[0]?.plateNumber ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setFirstPlate(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+  /**
+   * Whether one of this citizen's cars is parked right now.
+   *
+   * The pill on the finder bar used to be unconditional and blind: it read one
+   * plate out of the garage and offered to go looking for it, whether or not
+   * that car was anywhere near a car park. When there is a live session the
+   * answer is already known, and it is the most useful thing this screen can
+   * say — so it says it, with the bay and the running cost, and the tap goes
+   * straight there.
+   *
+   * On focus rather than on mount, because a session started while the app was
+   * open in another tab is the ordinary case: the driver hands their keys over,
+   * comes back to the map, and the pill should already know.
+   *
+   * Three rules hold this to its promise not to cost the map anything. It is
+   * never awaited by anything the map draws, so first paint does not wait on
+   * it. `allSettled` means a refusal cannot reach the map's error state — the
+   * map works signed out, and an unauthenticated `/me/*` call has to fail
+   * quietly rather than put "could not load car parks" over a working map. And
+   * the fare is a third request made only when there is something to price.
+   */
+  useFocusEffect(
+    React.useCallback(() => {
+      if (!user) {
+        setFirstPlate(null);
+        setParked(null);
+        setFare(null);
+        return;
+      }
+
+      let cancelled = false;
+
+      void (async () => {
+        const [active, garage] = await Promise.allSettled([
+          api.me.activeSessions(),
+          api.me.vehicles(),
+        ]);
+        if (cancelled) return;
+
+        // Newest first from the server, so this is the car they just parked.
+        // A citizen may have two of their vehicles out at once; the pill is one
+        // line and shows the most recent, and the screen it opens shows that
+        // one in full.
+        const live = active.status === "fulfilled" ? (active.value[0] ?? null) : null;
+        setParked(live);
+        setFirstPlate(
+          garage.status === "fulfilled" ? (garage.value[0]?.plateNumber ?? null) : null,
+        );
+
+        if (!live) {
+          setFare(null);
+          return;
+        }
+
+        try {
+          const quote = await api.sessions.quote(live.id);
+          if (!cancelled) setFare(quote.payableAmount);
+        } catch {
+          // Silent, and the pill drops the money rather than the whole line:
+          // where the car is and how long it has been there are worth showing
+          // on their own, and this phone is not going to substitute a figure
+          // of its own for the server's.
+          if (!cancelled) setFare(null);
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [user]),
+  );
 
   const fix = location.status === "ready" ? location.fix : KOLKATA;
   const locating = location.status === "locating" || location.status === "idle";
@@ -167,22 +228,31 @@ export default function MapScreen() {
         </View>
 
         {/* The way into "your car is parked". A citizen never starts a session
-            — an attendant does — so the only handle on it is a plate. */}
-        <Pressable
-          accessibilityRole="button"
-          onPress={() =>
-            firstPlate ? router.push(`/parked/${firstPlate}`) : router.push("/vehicles")
-          }
-          style={({ pressed }) => [styles.finder, pressed && styles.finderPressed]}
-        >
-          <Text style={styles.finderGlyph}>⌂</Text>
-          <Text style={styles.finderText} numberOfLines={1}>
-            {firstPlate
-              ? `Find my car · ${formatPlate(firstPlate)}`
-              : "Add your number plate to find your car"}
-          </Text>
-          <Text style={styles.finderChevron}>›</Text>
-        </Pressable>
+            — an attendant does — so with no live session the only handle on it
+            is a plate. */}
+        {parked ? (
+          <ParkedPill
+            session={parked}
+            fare={fare}
+            onPress={() => router.push(`/parked/${parked.plateNumber}`)}
+          />
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() =>
+              firstPlate ? router.push(`/parked/${firstPlate}`) : router.push("/vehicles")
+            }
+            style={({ pressed }) => [styles.finder, pressed && styles.finderPressed]}
+          >
+            <Text style={styles.finderGlyph}>⌂</Text>
+            <Text style={styles.finderText} numberOfLines={1}>
+              {firstPlate
+                ? `Find my car · ${formatPlate(firstPlate)}`
+                : "Add your number plate to find your car"}
+            </Text>
+            <Text style={styles.finderChevron}>›</Text>
+          </Pressable>
+        )}
       </View>
 
       {/* ---------------------------------------------------- bottom sheet */}
@@ -221,6 +291,57 @@ export default function MapScreen() {
         </View>
       </Animated.View>
     </View>
+  );
+}
+
+/**
+ * The live session, on the map.
+ *
+ * A separate component for one reason worth stating: the ticking clock lives in
+ * here, so a tick every fifteen seconds re-renders this pill and nothing else.
+ * Held in the screen above it, the same tick would re-render the Leaflet
+ * WebView and the whole nearby list four times a minute, to move one glyph.
+ */
+function ParkedPill({
+  session,
+  fare,
+  onPress,
+}: {
+  session: MySession;
+  /** The server's running total, or null when it could not be fetched. Never computed here. */
+  fare: Paise | null;
+  onPress: () => void;
+}) {
+  const now = useNow(true);
+  const minutes = elapsedMinutesSince(session.startAt, now) ?? session.elapsedMinutes;
+
+  // A bay when there is one, the car park's name when there is not. Both are
+  // answers to "where is my car"; "Bay —" is not.
+  const where = session.slot ? `Bay ${session.slot.code}` : session.zone.name;
+  const money = fare === null ? "" : ` · ${formatMoney(fare)} so far`;
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Your car is parked at ${where}, ${formatDuration(minutes)} so far${
+        fare === null ? "" : `, costing ${formatMoney(fare)}`
+      }. Open it.`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.finder, styles.parked, pressed && styles.finderPressed]}
+    >
+      <Text style={styles.finderGlyph}>◉</Text>
+      <View style={styles.parkedText}>
+        <Text style={styles.parkedWhere} numberOfLines={1}>
+          {where} · {formatPlate(session.plateNumber)}
+        </Text>
+        <Text style={styles.parkedMeta} numberOfLines={1}>
+          {formatDuration(minutes)}
+          {money}
+          {session.isOverstay ? " · over the maximum stay" : ""}
+        </Text>
+      </View>
+      <Text style={styles.finderChevron}>›</Text>
+    </Pressable>
   );
 }
 
@@ -471,6 +592,19 @@ const styles = StyleSheet.create({
   finderGlyph: { fontSize: 16, color: "#FFFFFF" },
   finderText: { flex: 1, fontSize: 14.5, fontWeight: "600", color: "#FFFFFF" },
   finderChevron: { fontSize: 20, color: "#FFFFFF", opacity: 0.7 },
+
+  // Two lines rather than one, because the bay and the running cost are both
+  // worth the height — this is the state where the pill has something to say.
+  parked: { minHeight: 58, paddingVertical: theme.space(1) },
+  parkedText: { flex: 1, gap: 1 },
+  parkedWhere: { fontSize: 14.5, fontWeight: "700", color: "#FFFFFF" },
+  parkedMeta: {
+    fontSize: 12.5,
+    fontWeight: "500",
+    color: "#FFFFFF",
+    opacity: 0.8,
+    fontVariant: ["tabular-nums"],
+  },
 
   sheet: {
     position: "absolute",
