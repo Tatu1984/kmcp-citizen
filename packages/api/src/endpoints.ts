@@ -415,7 +415,6 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
        *    server's message deliberately does not say whose, and neither should
        *    anything built on top of it.
        */
-      claimSession: (code: string) => client.post<MySession>("/me/sessions/claim", { code }),
 
       /** The two figures at the top of History, totalled by the server. */
       summary: (month?: string) =>

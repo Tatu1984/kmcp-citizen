@@ -4,7 +4,6 @@ import { useRouter } from "expo-router";
 import { ApiError, formatPlate, gapOf, normalisePlate, type MyVehicle } from "@kmcp/api";
 
 import { Banner, Button, Card, Field, Label, Loading, Plate, Screen, Sub } from "../components/ui";
-import { ClaimSession } from "../components/claim-session";
 import { api } from "../lib/api";
 import { useSession } from "../lib/session";
 import { theme } from "../lib/theme";
@@ -13,16 +12,17 @@ import { theme } from "../lib/theme";
  * The number plates this person says are theirs.
  *
  * A citizen never starts a parking session — an attendant does, at the kerb —
- * so a plate is the usual handle the app has on "my car". Registering one is
+ * so a plate is the only handle the app has on "my car". Registering one is
  * what makes the "find my car" path work by itself, for every session on that
- * car from now on.
+ * car from now on — including parking already recorded against that plate,
+ * which becomes theirs when they claim it.
  *
- * Which is why the session code lives at the bottom of this screen too. This is
- * where the map sends somebody who has no plate registered, and some of them
- * are standing at a car that is parked *right now* — asking them to type a
- * plate correctly before they can see their own bay is a worse deal than
- * letting them read the code off the ticket. A claim takes ownership of the
- * plate as well, so the two doors lead to the same place.
+ * It is the only way in, by design. A session code typed off a ticket, and a
+ * QR the attendant could show, both existed here and were removed: one door,
+ * consistently, is easier to explain to a driver than three. The cost is that a
+ * plate entered wrongly — by the driver here, or by the attendant at the kerb —
+ * leaves somebody with no way to reach their own session, so the plate field
+ * below is deliberately forgiving about spacing and case.
  */
 export default function Vehicles() {
   const router = useRouter();
@@ -201,14 +201,6 @@ export default function Vehicles() {
         </View>
       ) : null}
 
-      {/* The other way in, for somebody whose car is parked this minute and
-          whose plate is not the thing they can most reliably produce. */}
-      <ClaimSession
-        onClaimed={(claimed) => {
-          void load();
-          router.replace(`/parked/${claimed.plateNumber}`);
-        }}
-      />
     </Screen>
   );
 }

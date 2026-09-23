@@ -26,7 +26,6 @@ import {
   Screen,
   Sub,
 } from "../../components/ui";
-import { ClaimSession } from "../../components/claim-session";
 import { FareBreakdown, FareTotals } from "../../components/fare-breakdown";
 import { api } from "../../lib/api";
 import { useRazorpayCheckout } from "../../lib/checkout";
@@ -277,25 +276,6 @@ export default function Parked() {
     );
   }
 
-  /**
-   * Lands the citizen on the session they just claimed.
-   *
-   * Set here as well as navigated to, because a code very often belongs to the
-   * plate this screen is already showing — the driver mistyped it when they
-   * registered, or the attendant did at the kerb — and in that case `replace`
-   * with the same path is a no-op that would leave them staring at the
-   * not-found state they just escaped.
-   */
-  const onClaimed = (claimed: MySession) => {
-    setSession(claimed);
-    setQuote(null);
-    setError(null);
-    setLoading(false);
-    if (normalisePlate(claimed.plateNumber) !== wanted) {
-      router.replace(`/parked/${claimed.plateNumber}`);
-    }
-  };
-
   if (!session) {
     return (
       <Screen>
@@ -309,12 +289,6 @@ export default function Parked() {
           title="This car is not parked right now"
           body={`No live session for ${formatPlate(plate ?? "")}, and nothing earlier on it either. When an attendant starts one, it appears here on its own.`}
         />
-
-        {/* The dead end, which is exactly where the code belongs: somebody
-            standing at their car being told it is not parked is holding a
-            ticket that says otherwise, and the plate we matched on is the
-            likeliest thing to be wrong. */}
-        <ClaimSession onClaimed={onClaimed} title="Holding a ticket? Use the code" />
 
         <Button
           label="Back to the map"
