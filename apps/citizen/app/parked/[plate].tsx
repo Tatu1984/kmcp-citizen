@@ -93,6 +93,25 @@ const SESSION_POLL_MS = 20_000;
  */
 const QUOTE_POLL_MS = 60_000;
 
+/**
+ * Whether a session is done with, in the sense this screen cares about: the
+ * car has gone and there is no longer any money outstanding on it.
+ *
+ * Stricter than the paid banner below, which treats the mere existence of a
+ * payment row as settled. A payment that is still PENDING — a UPI QR the
+ * driver has not scanned yet, a card mid-authorisation — is exactly the case
+ * where the fare must stay in front of them, so `CAPTURED` is the test.
+ *
+ * A session that was never chargeable (it ended inside the free period, so
+ * `payableAmount` is zero) is finished too. Nobody owes anything and no
+ * payment row will ever appear for it.
+ */
+function isFinished(session: MySession): boolean {
+  if (session.endAt === null) return false;
+  if (session.payableAmount === 0) return true;
+  return session.payment?.status === "CAPTURED";
+}
+
 export default function Parked() {
   const { plate } = useLocalSearchParams<{ plate: string }>();
   const router = useRouter();
@@ -166,6 +185,27 @@ export default function Parked() {
       const recent = (await api.me.sessions()).find(
         (candidate) => normalisePlate(candidate.plateNumber) === wanted,
       );
+
+      /**
+       * A finished, settled parking does not belong on this screen any more.
+       *
+       * This is "where is my car", and once the car has gone and the fare is
+       * paid the answer is nothing — but the screen went on showing "WHERE
+       * YOUR CAR WAS" and a breakdown from that morning every time the plate
+       * was opened, which made the garage feel occupied by a car that left
+       * hours ago. Finished parking lives in History, which keeps all of it
+       * and keeps it for ever.
+       *
+       * Only on a fresh visit, though. If this session is already on screen
+       * the driver is looking at it — very often because they just paid it —
+       * and clearing the receipt out from under them at the moment it is
+       * confirmed would be its own kind of wrong.
+       */
+      if (recent && held === null && isFinished(recent)) {
+        setSession(null);
+        return;
+      }
+
       setSession(recent ?? null);
     },
     [wanted],
@@ -287,7 +327,15 @@ export default function Parked() {
 
         <Empty
           title="This car is not parked right now"
-          body={`No live session for ${formatPlate(plate ?? "")}, and nothing earlier on it either. When an attendant starts one, it appears here on its own.`}
+          body={`Nothing running on ${formatPlate(plate ?? "")}. When an attendant starts a session it appears here on its own — and once it is over and paid for, it moves to your history.`}
+        />
+
+        <Button label="Your cars" onPress={() => router.push("/vehicles")} />
+
+        <Button
+          label="Past parking"
+          variant="ghost"
+          onPress={() => router.push("/history")}
         />
 
         <Button
@@ -418,7 +466,23 @@ export default function Parked() {
       )}
 
       {/* ------------------------------------------------------ the money */}
-      {session.payment ? (
+      {/*
+        Nothing to pay while the car is still there.
+
+        The fare is not decided until the attendant marks the car unparked —
+        the figure above is what it would come to if it left this minute, and
+        it grows. The server says so plainly: `outstanding()` refuses a session
+        whose `payableAmount` is still null with "End the parking session
+        first". So these buttons, which were drawn for a live session too,
+        could only ever produce that refusal — an offer the system had already
+        decided not to honour.
+      */}
+      {live ? (
+        <Sub style={styles.balance}>
+          You can pay once the attendant marks the car unparked. The total is settled then, and it
+          appears here.
+        </Sub>
+      ) : session.payment ? (
         <Banner
           tone="good"
           title={`Paid ${formatMoney(session.payableAmount)}`}
