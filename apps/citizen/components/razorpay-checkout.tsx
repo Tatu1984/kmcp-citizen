@@ -140,7 +140,7 @@ function buildCheckoutHtml({
   const amount = JSON.stringify(gatewayOrder.amount);
   const currency = JSON.stringify(gatewayOrder.currency);
   const desc = JSON.stringify(description);
-  const name = JSON.stringify("KMCP Parking");
+  const name = JSON.stringify("Smart Parking");
 
   return `<!doctype html>
 <html>

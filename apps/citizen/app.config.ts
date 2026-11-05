@@ -3,11 +3,12 @@ import type { ConfigContext, ExpoConfig } from "expo/config";
 export default ({ config }: ConfigContext): ExpoConfig => {
   return {
     ...config,
-    name: "KMCP Parking",
+    name: "Smart Parking",
     slug: "kmcp-citizen",
     owner: "infps",
     version: "1.0.0",
     orientation: "portrait",
+    icon: "./assets/icon.png",
     scheme: "kmcpparking",
     // Light, deliberately, and not a preference: the whole app is built around
     // a map, and a map on a dark ground is unreadable in daylight.
@@ -15,10 +16,14 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     assetBundlePatterns: ["**/*"],
     ios: {
       supportsTablet: false,
-      bundleIdentifier: "in.gov.kmc.parking.citizen",
+      bundleIdentifier: "com.smartparking.citizen",
     },
     android: {
-      package: "in.gov.kmc.parking.citizen",
+      package: "com.smartparking.citizen",
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#01021d",
+      },
       permissions: ["ACCESS_FINE_LOCATION", "ACCESS_COARSE_LOCATION"],
     },
     plugins: [
@@ -28,7 +33,16 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         "expo-location",
         {
           locationWhenInUsePermission:
-            "KMCP uses your location to show the car parks nearest to you. It is never sent anywhere but the search for nearby bays.",
+            "Smart Parking uses your location to show the car parks nearest to you. It is never sent anywhere but the search for nearby bays.",
+        },
+      ],
+      [
+        "expo-splash-screen",
+        {
+          image: "./assets/splash-icon.png",
+          imageWidth: 200,
+          resizeMode: "contain",
+          backgroundColor: "#01021d",
         },
       ],
     ],

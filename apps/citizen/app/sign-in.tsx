@@ -92,7 +92,7 @@ export default function SignIn() {
     >
       <Screen contentStyle={styles.content}>
         <View style={styles.header}>
-          <Text style={styles.brand}>KMCP</Text>
+          <Text style={styles.brand}>Smart Parking</Text>
           <H1>Parking in Kolkata</H1>
           <Sub>
             Find a government bay, see what is free, and pay without looking for change.
