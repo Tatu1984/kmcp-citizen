@@ -64,6 +64,12 @@ export interface TokenPair {
 export interface LoginResponse {
   status: "authenticated" | "two_factor_required";
   challengeId?: string;
+  /** With `two_factor_required`: an authenticator code, or one we emailed. */
+  method?: "totp" | "email";
+  /** With an emailed code: the address it went to, masked. */
+  sentTo?: string;
+  /** With an emailed code, from a development server only. */
+  devCode?: string;
   tokens?: TokenPair;
   user?: Principal;
 }
@@ -402,11 +408,11 @@ export interface OtpRequested {
   sent: boolean;
   expiresInSeconds: number;
   /**
-   * The code itself, returned only when the server is not in production.
+   * The code itself, returned only by a development server (AUTH_DEV_BYPASS,
+   * which the server refuses in production).
    *
-   * It exists so a demo build can be signed into without an SMS gateway. The
-   * app shows it plainly labelled as such — quietly filling the field in would
-   * make a test build indistinguishable from a broken one.
+   * The app shows it plainly labelled as such — quietly filling the field in
+   * would make a test build indistinguishable from a broken one.
    */
   devCode?: string;
 }

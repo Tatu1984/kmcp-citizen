@@ -20,8 +20,8 @@ import {
  *
  * Signing in is two steps rather than one, because an OTP is: asking for a code
  * and presenting it are separate acts that fail for different reasons, and a
- * single `signIn(phone, code)` would have no way to express "the code was
- * sent, now wait". `pendingPhone` is what the second screen knows.
+ * single `signIn(email, code)` would have no way to express "the code was
+ * sent, now wait". `pendingEmail` is what the second screen knows.
  */
 
 interface SessionState {
@@ -29,18 +29,18 @@ interface SessionState {
   configured: boolean;
   user: CitizenProfile | null;
   online: boolean;
-  /** The number a code was sent to, while one is outstanding. */
-  pendingPhone: string | null;
+  /** The address a code was sent to, while one is outstanding. */
+  pendingEmail: string | null;
   /**
    * The code, when the server volunteered it.
    *
-   * Only ever populated outside production, where the server returns the code
-   * it generated so a demo build works without an SMS gateway. It is shown
+   * Only ever populated by a development server, which returns the code it
+   * generated so sign-in works without a mailbox to hand. It is shown
    * labelled as a test aid, never filled in silently — an app that signs itself
    * in is indistinguishable from one that has stopped checking.
    */
   devCode: string | null;
-  requestCode: (phone: string) => Promise<void>;
+  requestCode: (email: string) => Promise<void>;
   verifyCode: (code: string) => Promise<void>;
   cancelCode: () => void;
   signOut: () => Promise<void>;
@@ -48,24 +48,16 @@ interface SessionState {
 
 const SessionContext = React.createContext<SessionState | null>(null);
 
-/** "+91 98301 14227" as the server wants it, and as a person types it. */
-export function normalisePhone(input: string): string {
-  const digits = input.replace(/\D/g, "");
-  const last10 = digits.slice(-10);
-  return last10.length === 10 ? `+91${last10}` : input.trim();
-}
-
-export function formatPhone(phone: string): string {
-  const digits = phone.replace(/\D/g, "").slice(-10);
-  if (digits.length !== 10) return phone;
-  return `+91 ${digits.slice(0, 5)} ${digits.slice(5)}`;
+/** One spelling of an address however it was typed — the server's too. */
+export function normaliseEmail(input: string): string {
+  return input.trim().toLowerCase();
 }
 
 export function SessionProvider({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = React.useState(false);
   const [user, setUser] = React.useState<CitizenProfile | null>(null);
   const [online, setOnline] = React.useState(true);
-  const [pendingPhone, setPendingPhone] = React.useState<string | null>(null);
+  const [pendingEmail, setPendingEmail] = React.useState<string | null>(null);
   const [devCode, setDevCode] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -102,19 +94,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const requestCode = React.useCallback(async (phone: string) => {
-    const normalised = normalisePhone(phone);
+  const requestCode = React.useCallback(async (email: string) => {
+    const normalised = normaliseEmail(email);
     const result = await api.auth.requestOtp(normalised);
-    setPendingPhone(normalised);
+    setPendingEmail(normalised);
     setDevCode(result.devCode ?? null);
   }, []);
 
   const verifyCode = React.useCallback(
     async (code: string) => {
-      if (!pendingPhone) throw new Error("No code has been requested.");
+      if (!pendingEmail) throw new Error("No code has been requested.");
 
       const platform = Platform.OS === "ios" ? "ios" : "android";
-      const result = await api.auth.verifyOtp(pendingPhone, code, platform);
+      const result = await api.auth.verifyOtp(pendingEmail, code, platform);
       if (!result.tokens) {
         // The OTP path never asks for a second factor, so tokens missing here
         // means the server changed shape rather than that anything is pending.
@@ -123,14 +115,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
       await saveTokens(result.tokens);
       setUser(await api.me.profile());
-      setPendingPhone(null);
+      setPendingEmail(null);
       setDevCode(null);
     },
-    [pendingPhone],
+    [pendingEmail],
   );
 
   const cancelCode = React.useCallback(() => {
-    setPendingPhone(null);
+    setPendingEmail(null);
     setDevCode(null);
   }, []);
 
@@ -146,7 +138,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     configured: isConfigured(),
     user,
     online,
-    pendingPhone,
+    pendingEmail,
     devCode,
     requestCode,
     verifyCode,

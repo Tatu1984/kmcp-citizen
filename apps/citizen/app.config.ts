@@ -17,6 +17,11 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       supportsTablet: false,
       bundleIdentifier: "com.smartparking.citizen",
+      infoPlist: {
+        // HTTPS only, nothing else: spares App Store Connect's export-
+        // compliance question on every upload.
+        ITSAppUsesNonExemptEncryption: false,
+      },
     },
     android: {
       package: "com.smartparking.citizen",

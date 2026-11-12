@@ -93,16 +93,15 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
       me: () => client.get<Record<string, unknown>>("/auth/me"),
 
       /**
-       * Sends a citizen a six-digit code by SMS.
+       * Emails a citizen a six-digit sign-in code.
        *
-       * The only field the server accepts is the phone number — it normalises
-       * to +91 itself, so there is no country code to send and no device to
-       * name. Rate limited to five requests in five minutes per install, which
-       * is why the screen that calls this shows a countdown rather than a
-       * button that can be hammered.
+       * The server lower-cases the address itself. Rate limited — one request
+       * per address every thirty seconds, and five per install in five
+       * minutes — which is why the screen that calls this shows a countdown
+       * rather than a button that can be hammered.
        */
-      requestOtp: (phone: string) =>
-        client.post<OtpRequested>("/auth/otp/request", { phone }, { anonymous: true }),
+      requestOtp: (email: string) =>
+        client.post<OtpRequested>("/auth/otp/request", { email }, { anonymous: true }),
 
       /**
        * Exchanges the code for a token pair, creating the account on the first
@@ -114,10 +113,10 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
        * the public — a citizen replacing a broken phone, or signing in on a
        * borrowed one, is ordinary behaviour and must not need a supervisor.
        */
-      verifyOtp: (phone: string, code: string, platform: "ios" | "android") =>
+      verifyOtp: (email: string, code: string, platform: "ios" | "android") =>
         client.post<LoginResponse>(
           "/auth/otp/verify",
-          { phone, code, platform },
+          { email, code, platform },
           { anonymous: true },
         ),
 
