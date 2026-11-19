@@ -99,7 +99,7 @@ export default function History() {
         <Card raise>
           <Label>Sign in first</Label>
           <Sub style={styles.body}>
-            Your parking history belongs to your account. Sign in with your mobile number to see it.
+            Your parking history belongs to your account. Sign in with your email address to see it.
           </Sub>
         </Card>
         <Button label="Sign in" onPress={() => router.push("/sign-in")} />

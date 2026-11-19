@@ -44,6 +44,8 @@ interface SessionState {
   verifyCode: (code: string) => Promise<void>;
   cancelCode: () => void;
   signOut: () => Promise<void>;
+  /** Erases the account on the server, then forgets it on this phone. */
+  deleteAccount: () => Promise<void>;
 }
 
 const SessionContext = React.createContext<SessionState | null>(null);
@@ -133,6 +135,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   }, []);
 
+  const deleteAccount = React.useCallback(async () => {
+    await api.me.deleteAccount();
+    // Nothing to log out of: the server has already ended every session of an
+    // erased account. What is left is this phone's copy of the tokens.
+    await saveTokens(null);
+    setUser(null);
+  }, []);
+
   const value: SessionState = {
     ready,
     configured: isConfigured(),
@@ -144,6 +154,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     verifyCode,
     cancelCode,
     signOut,
+    deleteAccount,
   };
 
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

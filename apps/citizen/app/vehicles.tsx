@@ -119,7 +119,7 @@ export default function Vehicles() {
         <Card raise>
           <Label>Sign in first</Label>
           <Sub style={styles.body}>
-            Your vehicles belong to your account. Sign in with your mobile number to see them.
+            Your vehicles belong to your account. Sign in with your email address to see them.
           </Sub>
         </Card>
         <Button label="Sign in" onPress={() => router.push("/sign-in")} />

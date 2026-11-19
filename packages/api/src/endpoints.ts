@@ -346,6 +346,14 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
     me: {
       profile: () => client.get<CitizenProfile>("/auth/me"),
 
+      /**
+       * Deletes this account. The server erases the personal data and keeps the
+       * sessions and payments with nothing that identifies the person, and the
+       * account stops working everywhere at once. Refused with a plain reason
+       * while a session, payment, complaint or pass is still open.
+       */
+      deleteAccount: () => client.delete<{ erased: true }>("/privacy/account"),
+
       vehicles: () => client.get<MyVehicle[]>("/me/vehicles"),
 
       /**

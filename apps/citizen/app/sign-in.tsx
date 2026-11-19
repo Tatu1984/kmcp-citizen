@@ -1,9 +1,10 @@
 import * as React from "react";
-import { KeyboardAvoidingView, Platform, StyleSheet, Text, View } from "react-native";
+import { KeyboardAvoidingView, Linking, Platform, StyleSheet, Text, View } from "react-native";
 import { Redirect, useRouter } from "expo-router";
 import { ApiError } from "@kmcp/api";
 
 import { Banner, Button, Card, Field, H1, Label, Screen, Sub } from "../components/ui";
+import { PRIVACY_POLICY_URL } from "../lib/links";
 import { useSession } from "../lib/session";
 import { theme } from "../lib/theme";
 
@@ -130,7 +131,11 @@ export default function SignIn() {
 
             <Sub style={styles.footnote}>
               We email you a six-digit code. No password to remember, and no account to create —
-              your email address is the account.
+              your email address is the account. By continuing you agree to our{" "}
+              <Text style={styles.link} onPress={() => void Linking.openURL(PRIVACY_POLICY_URL)}>
+                privacy policy
+              </Text>
+              .
             </Sub>
           </>
         ) : (
@@ -218,6 +223,7 @@ const styles = StyleSheet.create({
     color: theme.colour.primary,
   },
   footnote: { fontSize: 13, lineHeight: 19 },
+  link: { color: theme.colour.primary, textDecorationLine: "underline" },
   codeInput: { fontSize: 26, letterSpacing: 8, textAlign: "center" },
   secondary: { flexDirection: "row", gap: theme.space(1.125) },
   grow: { flex: 1 },
