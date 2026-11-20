@@ -1,6 +1,7 @@
 import * as React from "react";
 import { Platform } from "react-native";
 import NetInfo from "@react-native-community/netinfo";
+import * as SecureStore from "expo-secure-store";
 import type { CitizenProfile } from "@kmcp/api";
 
 import {
@@ -50,6 +51,35 @@ interface SessionState {
 
 const SessionContext = React.createContext<SessionState | null>(null);
 
+/**
+ * The last profile the server returned, kept beside the tokens.
+ *
+ * So a cold start opens straight onto the app instead of waiting a full round
+ * trip to the server for a name and an email address it already knew. The
+ * server is still asked, in the background, and its answer replaces this one;
+ * if the session has really ended, the refresh fails and `onSignedOut` clears
+ * both. Secure storage, like the tokens, because it holds an email address.
+ */
+const PROFILE_KEY = "kmcp.citizen.profile";
+
+async function loadProfile(): Promise<CitizenProfile | null> {
+  const raw = await SecureStore.getItemAsync(PROFILE_KEY).catch(() => null);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as CitizenProfile;
+  } catch {
+    return null;
+  }
+}
+
+function saveProfile(profile: CitizenProfile | null): void {
+  void (
+    profile
+      ? SecureStore.setItemAsync(PROFILE_KEY, JSON.stringify(profile))
+      : SecureStore.deleteItemAsync(PROFILE_KEY)
+  ).catch(() => undefined);
+}
+
 /** One spelling of an address however it was typed — the server's too. */
 export function normaliseEmail(input: string): string {
   return input.trim().toLowerCase();
@@ -67,21 +97,37 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       await initialise();
-      onSignedOut(() => setUser(null));
+      onSignedOut(() => {
+        setUser(null);
+        saveProfile(null);
+      });
 
-      const tokens = await loadTokens();
-      if (tokens && isConfigured()) {
+      const [tokens, remembered] = await Promise.all([loadTokens(), loadProfile()]);
+      const signedIn = Boolean(tokens && isConfigured());
+
+      // Open on what this phone already knows, then check it with the server.
+      // With nothing remembered (signed in on an older version of the app),
+      // wait for the server instead, so a signed-in person is never shown the
+      // signed-out screen for half a second.
+      if (signedIn && remembered && !cancelled) setUser(remembered);
+      if (!cancelled && (!signedIn || remembered)) setReady(true);
+
+      if (signedIn) {
         try {
           const me = await api.me.profile();
-          if (!cancelled) setUser(me);
+          if (!cancelled) {
+            setUser(me);
+            saveProfile(me);
+          }
         } catch {
           // An expired session on a cold start is ordinary, and so is opening
-          // the app on a train with no signal. Neither is worth an error: the
-          // map works signed out, so land there and let them sign in when they
-          // need to.
+          // the app on a train with no signal. Neither is worth an error. A
+          // session that has really ended fails its refresh and `onSignedOut`
+          // clears the remembered profile; a dropped connection keeps it.
+        } finally {
+          if (!cancelled) setReady(true);
         }
       }
-      if (!cancelled) setReady(true);
     })();
 
     return () => {
@@ -116,7 +162,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       }
 
       await saveTokens(result.tokens);
-      setUser(await api.me.profile());
+      const me = await api.me.profile();
+      setUser(me);
+      saveProfile(me);
       setPendingEmail(null);
       setDevCode(null);
     },
@@ -132,6 +180,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     const tokens = await loadTokens();
     if (tokens?.refreshToken) await api.auth.logout(tokens.refreshToken).catch(() => undefined);
     await saveTokens(null);
+    saveProfile(null);
     setUser(null);
   }, []);
 
@@ -140,6 +189,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     // Nothing to log out of: the server has already ended every session of an
     // erased account. What is left is this phone's copy of the tokens.
     await saveTokens(null);
+    saveProfile(null);
     setUser(null);
   }, []);
 

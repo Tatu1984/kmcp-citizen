@@ -17,7 +17,7 @@ import { Bay } from "../../../components/availability";
 import { vehicleTypeWord } from "../../../lib/availability";
 import { api } from "../../../lib/api";
 import { theme } from "../../../lib/theme";
-import { recallZone } from "../../../lib/zone-cache";
+import { recallSlots, recallZone, rememberSlots } from "../../../lib/zone-cache";
 
 /**
  * Every bay in one car park, as a grid.
@@ -37,7 +37,11 @@ export default function Bays() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const zone = id ? recallZone(id) : null;
 
-  const [slots, setSlots] = React.useState<Slot[] | null>(null);
+  // Drawn at once from what the car park screen just loaded, then replaced
+  // by the server's answer below.
+  const [slots, setSlots] = React.useState<Slot[] | null>(() =>
+    id ? sortByCode(recallSlots(id)) : null,
+  );
   const [error, setError] = React.useState<{ title: string; body: string } | null>(null);
   // Bumped by "Try again". A dropped connection is the common failure here,
   // and leaving the screen and coming back is not a retry anyone finds.
@@ -47,18 +51,19 @@ export default function Bays() {
     if (!id) return;
     let cancelled = false;
     setError(null);
-    setSlots(null);
 
     void api.slots
       .list(id)
       .then((found) => {
         if (cancelled) return;
-        // Sorted here rather than trusted from the server: the codes are the
-        // layout, and a grid that jumps from B12 to A03 is unreadable.
-        setSlots([...found].sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true })));
+        rememberSlots(id, found);
+        setSlots(sortByCode(found));
       })
       .catch((cause: unknown) => {
         if (cancelled) return;
+        // Bays already on screen from the car park screen stay there; they
+        // are under a minute old, and a grid beats an error for a refresh.
+        if (recallSlots(id)) return;
         // A refusal from a server that answered is worth saying differently
         // from a dead connection: only one of the two is fixed by waiting.
         const gap = gapOf(cause);
@@ -172,6 +177,16 @@ export default function Bays() {
       )}
     </Screen>
   );
+}
+
+/**
+ * Sorted here rather than trusted from the server: the codes are the layout,
+ * and a grid that jumps from B12 to A03 is unreadable.
+ */
+function sortByCode(slots: Slot[] | null): Slot[] | null {
+  return slots
+    ? [...slots].sort((a, b) => a.code.localeCompare(b.code, "en", { numeric: true }))
+    : null;
 }
 
 function LegendItem({

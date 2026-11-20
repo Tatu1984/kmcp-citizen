@@ -1,5 +1,5 @@
 import { deriveAvailability } from "./availability";
-import type { Availability, CachedZone, GeoPolygon, NearbyZone, SlotType } from "@kmcp/api";
+import type { Availability, CachedZone, GeoPolygon, NearbyZone, Slot, SlotType } from "@kmcp/api";
 
 /**
  * The car parks the map last fetched, kept in memory for the screen after it.
@@ -94,4 +94,26 @@ export function toZoneView(zone: CachedZone): ZoneView {
     availability: zone.availability ?? deriveAvailability(available, zone.capacity),
     boundary: zone.boundary ?? null,
   };
+}
+
+/**
+ * The bays the car park screen last loaded, for the bay grid one tap later.
+ *
+ * Both screens show the same list, and fetching it twice cost a second round
+ * trip to a server on another continent. The grid draws these at once and
+ * still asks the server, replacing them with its answer — so this only ever
+ * saves a wait, never shows a bay status the server has not just confirmed
+ * within the last minute.
+ */
+const SLOTS_FRESH_MS = 60_000;
+const rememberedSlots = new Map<string, { at: number; slots: Slot[] }>();
+
+export function rememberSlots(zoneId: string, slots: Slot[]): void {
+  rememberedSlots.set(zoneId, { at: Date.now(), slots });
+}
+
+export function recallSlots(zoneId: string): Slot[] | null {
+  const held = rememberedSlots.get(zoneId);
+  if (!held || Date.now() - held.at > SLOTS_FRESH_MS) return null;
+  return held.slots;
 }

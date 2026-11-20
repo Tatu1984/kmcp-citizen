@@ -85,11 +85,29 @@ export function useLocation(
 
   const locate = React.useCallback(async (): Promise<Fix | null> => {
     setState({ status: "locating" });
+    let recentFix: Fix | null = null;
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== "granted") {
         setState({ status: "denied" });
         return null;
+      }
+
+      // The phone's last known position answers at once, where a fresh fix can
+      // take several seconds — and the car-park search waits on this. A recent
+      // one is good enough to start with; the fresh fix below replaces it, and
+      // the screens only search again if it moved them a meaningful distance.
+      const recent = await Location.getLastKnownPositionAsync({
+        maxAge: 5 * 60_000,
+        requiredAccuracy: 1000,
+      }).catch(() => null);
+      if (recent) {
+        recentFix = {
+          lat: recent.coords.latitude,
+          lng: recent.coords.longitude,
+          accuracy: recent.coords.accuracy ?? null,
+        };
+        setState({ status: "ready", fix: recentFix });
       }
 
       const position = await Location.getCurrentPositionAsync({
@@ -110,6 +128,12 @@ export function useLocation(
 
       return fix;
     } catch (error) {
+      // A fresh fix that failed after a recent one answered leaves the recent
+      // one standing: it is still where the phone very probably is.
+      if (recentFix) {
+        if (watch) void startWatching();
+        return recentFix;
+      }
       setState({
         status: "failed",
         reason: error instanceof Error ? error.message : "Could not get a position.",

@@ -28,7 +28,7 @@ import { availabilityTone, availabilityWord, vehicleTypeWord } from "../../../li
 import { api } from "../../../lib/api";
 import { directionsUrl } from "../../../lib/maps";
 import { theme } from "../../../lib/theme";
-import { recallZone, toZoneView, type ZoneView } from "../../../lib/zone-cache";
+import { recallZone, rememberSlots, toZoneView, type ZoneView } from "../../../lib/zone-cache";
 
 /**
  * One car park.
@@ -112,7 +112,10 @@ export default function ZoneDetail() {
       if (cancelled) return;
 
       if (summaryResult.status === "fulfilled") setSummary(summaryResult.value);
-      if (slotsResult.status === "fulfilled") setSlots(slotsResult.value);
+      if (slotsResult.status === "fulfilled") {
+        setSlots(slotsResult.value);
+        rememberSlots(id, slotsResult.value);
+      }
       setLoading(false);
     })();
 

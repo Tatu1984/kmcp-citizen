@@ -167,9 +167,21 @@ export default function Parked() {
     async (force = false): Promise<void> => {
       if (!wanted) return;
 
-      const parked = (await api.me.activeSessions()).find(
-        (candidate) => normalisePlate(candidate.plateNumber) === wanted,
-      );
+      const held = sessionRef.current;
+      const mine = (candidate: { plateNumber: string }) =>
+        normalisePlate(candidate.plateNumber) === wanted;
+
+      // On a first visit nothing is known yet, and either answer may be the
+      // one that matters — so both are asked at once rather than one after the
+      // other, which on a server this far away is half a second saved. Polls
+      // after that ask only for the live session, as before.
+      const firstLook = held === null;
+      const [active, history] = await Promise.all([
+        api.me.activeSessions(),
+        firstLook || force ? api.me.sessions() : Promise.resolve(null),
+      ]);
+
+      const parked = active.find(mine);
       if (parked) {
         setSession(parked);
         return;
@@ -179,12 +191,9 @@ export default function Parked() {
       // there is nothing to go and ask — so the history call is spent once, on
       // the transition out of ACTIVE, and not on every poll. `force` is for
       // after a payment, which does change a settled row.
-      const held = sessionRef.current;
       if (!force && held !== null && held.endAt !== null) return;
 
-      const recent = (await api.me.sessions()).find(
-        (candidate) => normalisePlate(candidate.plateNumber) === wanted,
-      );
+      const recent = (history ?? (await api.me.sessions())).find(mine);
 
       /**
        * A finished, settled parking does not belong on this screen any more.
