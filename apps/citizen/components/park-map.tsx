@@ -1,12 +1,21 @@
 import * as React from "react";
 import { Pressable, StyleSheet } from "react-native";
 import { MaterialIcons } from "@expo/vector-icons";
-import { WebView, type WebViewMessageEvent } from "react-native-webview";
+import { WebView as WebViewBase, type WebViewMessageEvent } from "react-native-webview";
 import type { NearbyZone } from "@kmcp/api";
 
 import { availabilityColour } from "../lib/availability";
 import type { Fix } from "../lib/location";
 import { theme } from "../lib/theme";
+
+/**
+ * react-native-webview 14.0.1 types its class as `WebView<P = undefined>`,
+ * with props `WebViewProps & P` — which, with the default, is `never`, so no
+ * prop type-checks. Pinning the generic to `object` restores the real props.
+ * Types only; the component is the same one at runtime.
+ */
+const WebView = WebViewBase<object>;
+type WebView = WebViewBase<object>;
 
 /**
  * The map of car parks.
