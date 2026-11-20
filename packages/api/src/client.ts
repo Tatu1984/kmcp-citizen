@@ -144,11 +144,17 @@ export class ApiClient {
     } catch (error) {
       clearTimeout(timer);
       const aborted = error instanceof Error && error.name === "AbortError";
+      // Nothing in this app is queued for later, so the message must not
+      // promise a retry. A read that timed out changed nothing; a write that
+      // timed out may have landed, and saying so stops a double payment.
+      const isRead = (rest.method ?? "GET").toUpperCase() === "GET";
       throw new ApiError(
         aborted ? "TIMEOUT" : "NETWORK_ERROR",
         aborted
-          ? "That took too long. It may still have gone through — it will be retried."
-          : "No connection. This will be sent when you are back online.",
+          ? isRead
+            ? "The server took too long to answer. Try again."
+            : "That took too long. It may still have gone through — check before trying again."
+          : "Could not reach the server. Check your internet connection and try again.",
         0,
       );
     }

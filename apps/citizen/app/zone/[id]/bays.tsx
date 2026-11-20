@@ -3,7 +3,16 @@ import { StyleSheet, Text, View } from "react-native";
 import { Stack, useLocalSearchParams } from "expo-router";
 import { ApiError, gapOf, type Slot, type SlotStatus } from "@kmcp/api";
 
-import { Card, Label, Loading, Screen, Sub, Swatch, Unavailable } from "../../../components/ui";
+import {
+  Button,
+  Card,
+  Label,
+  Loading,
+  Screen,
+  Sub,
+  Swatch,
+  Unavailable,
+} from "../../../components/ui";
 import { Bay } from "../../../components/availability";
 import { vehicleTypeWord } from "../../../lib/availability";
 import { api } from "../../../lib/api";
@@ -30,10 +39,15 @@ export default function Bays() {
 
   const [slots, setSlots] = React.useState<Slot[] | null>(null);
   const [error, setError] = React.useState<{ title: string; body: string } | null>(null);
+  // Bumped by "Try again". A dropped connection is the common failure here,
+  // and leaving the screen and coming back is not a retry anyone finds.
+  const [attempt, setAttempt] = React.useState(0);
 
   React.useEffect(() => {
     if (!id) return;
     let cancelled = false;
+    setError(null);
+    setSlots(null);
 
     void api.slots
       .list(id)
@@ -67,7 +81,7 @@ export default function Bays() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, attempt]);
 
   const counts = React.useMemo(() => {
     const tally: Record<SlotStatus, number> = {
@@ -104,7 +118,15 @@ export default function Bays() {
       </View>
 
       {error ? (
-        <Unavailable title={error.title} body={error.body} />
+        <>
+          <Unavailable title={error.title} body={error.body} />
+          <Button
+            label="Try again"
+            variant="ghost"
+            size="medium"
+            onPress={() => setAttempt((n) => n + 1)}
+          />
+        </>
       ) : !slots ? (
         <Loading label="Loading the bays" />
       ) : slots.length === 0 ? (
