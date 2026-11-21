@@ -73,6 +73,47 @@ async function fetchAll<T>(
   return rows.length > limit ? rows.slice(0, limit) : rows;
 }
 
+/**
+ * A season-ticket plan as `GET /pass-plans` actually sends it.
+ *
+ * The route is shared with the portal, so it speaks the portal's shape: the
+ * price is `price`, the length is `durationDays`, and the vehicle type is an
+ * object alongside its id. `PassPlan` is what the screens were written
+ * against; `toPassPlan` is the one place the two meet, so a screen never
+ * renders an object where it expected a word.
+ */
+interface ServerPassPlan {
+  id: string;
+  name: string;
+  description?: string | null;
+  price?: number;
+  amount?: number;
+  durationDays?: number;
+  validDays?: number;
+  vehicleTypeId?: string;
+  vehicleType?: { id: string; code: string; label: string } | string | null;
+  zoneIds?: string[];
+  zoneId?: string | null;
+  isActive?: boolean;
+}
+
+function toPassPlan(plan: ServerPassPlan): PassPlan {
+  const type =
+    typeof plan.vehicleType === "string"
+      ? plan.vehicleType
+      : (plan.vehicleType?.code ?? plan.vehicleTypeId ?? "CAR");
+  return {
+    id: plan.id,
+    name: plan.name,
+    description: plan.description ?? null,
+    amount: plan.price ?? plan.amount ?? 0,
+    validDays: plan.durationDays ?? plan.validDays ?? 0,
+    vehicleType: type as PassPlan["vehicleType"],
+    // One zone is a plan for that car park; none or several is not one zone.
+    zoneId: plan.zoneId ?? (plan.zoneIds?.length === 1 ? plan.zoneIds[0]! : null),
+  };
+}
+
 export function createApi(client: ApiClient, queue: OfflineQueue) {
   return {
     auth: {
@@ -487,7 +528,10 @@ export function createApi(client: ApiClient, queue: OfflineQueue) {
 
     passes: {
       /** Season-ticket plans. `@Public()` on the server — no account needed to read them. */
-      plans: () => client.get<PassPlan[]>("/pass-plans", { query: { pageSize: 50 } }),
+      plans: async () =>
+        (await client.get<ServerPassPlan[]>("/pass-plans", { query: { pageSize: 50 } }))
+          .filter((plan) => plan.isActive !== false)
+          .map(toPassPlan),
 
       /** `POST /me/passes`, which exists: buying a pass also claims the plate. */
       purchase: (planId: string, plateNumber: string) =>
