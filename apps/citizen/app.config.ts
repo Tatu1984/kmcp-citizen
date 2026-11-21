@@ -1,7 +1,33 @@
 import type { ConfigContext, ExpoConfig } from "expo/config";
+import { withAndroidManifest, type ConfigPlugin } from "expo/config-plugins";
+
+/**
+ * Hardware the app can do without, declared as optional.
+ *
+ * Android infers these as *required* — screen.portrait from the portrait lock,
+ * wifi from a library's Wi-Fi state permission — and Play then hides the app
+ * from devices without them (some tablets, Chromebooks, mobile-data-only
+ * phones). The app needs neither: it locks to portrait where it can and talks
+ * to the server over any connection.
+ */
+const OPTIONAL_FEATURES = ["android.hardware.screen.portrait", "android.hardware.wifi"];
+
+const withOptionalFeatures: ConfigPlugin = (config) =>
+  withAndroidManifest(config, (mod) => {
+    const manifest = mod.modResults.manifest as typeof mod.modResults.manifest & {
+      "uses-feature"?: { $: Record<string, string> }[];
+    };
+    const features = (manifest["uses-feature"] ??= []);
+    for (const name of OPTIONAL_FEATURES) {
+      const existing = features.find((f) => f.$["android:name"] === name);
+      if (existing) existing.$["android:required"] = "false";
+      else features.push({ $: { "android:name": name, "android:required": "false" } });
+    }
+    return mod;
+  });
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  return {
+  return withOptionalFeatures({
     ...config,
     name: "Smart Parking",
     slug: "kmcp-citizen",
@@ -60,5 +86,5 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         projectId: "588dd028-c896-4e79-8024-931ebf7e6725",
       },
     },
-  };
+  });
 };
